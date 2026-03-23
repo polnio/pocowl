@@ -1,0 +1,11 @@
+[package]
+name = "pocowl-wlvalue"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+pocowl-protocols-base.workspace = true
+
+anyhow = "1.0.102"
+byteorder = "1.5.0"

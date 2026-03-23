@@ -1,0 +1,10 @@
+[package]
+name = "pocowl-protocols"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+pocowl-protocols-base.workspace = true
+pocowl-scanner.workspace = true
+pocowl-wlvalue.workspace = true

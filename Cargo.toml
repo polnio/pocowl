@@ -8,4 +8,8 @@ edition = "2024"
 authors = ["Po Co<me@polnio.dev>"]
 
 [workspace.dependencies]
-pocowl-scanner = { path = "crates/scanner" }
+pocowl-protocols      = { path = "crates/protocols" }
+pocowl-protocols-base = { path = "crates/protocols-base" }
+pocowl-scanner        = { path = "crates/scanner" }
+pocowl-wlsocket       = { path = "crates/wlsocket" }
+pocowl-wlvalue        = { path = "crates/wlvalue" }

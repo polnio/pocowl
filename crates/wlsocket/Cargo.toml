@@ -1,0 +1,12 @@
+[package]
+name = "pocowl-wlsocket"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+pocowl-protocols-base.workspace = true
+
+anyhow = "1.0.102"
+tokio = { version = "1.50.0", features = ["macros", "net", "sync"] }
+byteorder = "1.5.0"

@@ -86,10 +86,25 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "byteorder",
+ "pocowl-protocols",
  "pocowl-scanner",
+ "pocowl-wlsocket",
  "tokio",
  "tokio-util",
 ]
+
+[[package]]
+name = "pocowl-protocols"
+version = "0.1.0"
+dependencies = [
+ "pocowl-protocols-base",
+ "pocowl-scanner",
+ "pocowl-wlvalue",
+]
+
+[[package]]
+name = "pocowl-protocols-base"
+version = "0.1.0"
 
 [[package]]
 name = "pocowl-scanner"
@@ -100,6 +115,25 @@ dependencies = [
  "serde",
  "serde-xml-rs",
  "syn",
+]
+
+[[package]]
+name = "pocowl-wlsocket"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "pocowl-protocols-base",
+ "tokio",
+]
+
+[[package]]
+name = "pocowl-wlvalue"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "pocowl-protocols-base",
 ]
 
 [[package]]
