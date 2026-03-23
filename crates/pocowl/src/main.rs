@@ -1,9 +1,45 @@
+mod protocols;
+mod value;
+
+use crate::protocols::WaylandProtocol;
+use crate::protocols::wayland::{WlDisplay, WlDisplayListener, WlRegistry, WlRegistryListener};
 use anyhow::{Context, Result};
 use byteorder::{NativeEndian, ReadBytesExt};
-use std::io::Read as _;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::{collections::HashMap, io::Read as _};
 use tokio::net::{UnixListener, UnixStream};
 use tokio_util::sync::CancellationToken;
+
+struct PocoWl {
+    objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>>,
+}
+impl PocoWl {
+    fn new() -> Self {
+        let mut objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>> = HashMap::new();
+        objects.insert(1, Rc::new(WlDisplay));
+        Self { objects }
+    }
+}
+
+impl WlRegistryListener for PocoWl {
+    fn bind(&mut self, name: u32, id: u32) -> u32 {
+        todo!()
+    }
+}
+
+impl WlDisplayListener for PocoWl {
+    fn sync(&mut self, callback: u32) -> u32 {
+        // todo!()
+        0
+    }
+
+    fn get_registry(&mut self, registry: u32) -> u32 {
+        self.objects.insert(registry, Rc::new(WlRegistry));
+        0
+    }
+}
+
 // fn get_transport() -> Option<PathBuf> {
 //     let display = std::env::var_os("WAYLAND_DISPLAY");
 //     let display = display.as_deref().unwrap_or("wayland-0".as_ref());
@@ -97,6 +133,12 @@ impl WaylandSocket {
             while !buf.is_empty() {
                 let msg = WaylandMessage::from_raw(&mut buf)?;
                 println!("Got message: {msg:?}");
+                let mut state = PocoWl::new();
+                let mut data = msg.data.as_slice();
+                let p = state.objects.get(&msg.object_id).cloned().unwrap();
+                p.call(&mut state, msg.opcode, &mut data);
+                // protocols::wayland::WlDisplay::call(&state, msg.opcode, &mut buf);
+                // state.call(msg.opcode, &mut buf);
             }
         }
         println!("Connection closed");

@@ -6,3 +6,6 @@ resolver = "3"
 version = "0.1.0"
 edition = "2024"
 authors = ["Po Co<me@polnio.dev>"]
+
+[workspace.dependencies]
+pocowl-scanner = { path = "crates/scanner" }

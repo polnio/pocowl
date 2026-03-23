@@ -1,3 +1,6 @@
 [submodule "vendor/wayland-protocols"]
 	path = vendor/wayland-protocols
 	url = https://gitlab.freedesktop.org/wayland/wayland-protocols
+[submodule "vendor/wayland"]
+	path = vendor/wayland
+	url = https://gitlab.freedesktop.org/wayland/wayland

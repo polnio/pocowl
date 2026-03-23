@@ -5,6 +5,8 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+pocowl-scanner.workspace = true
+
 anyhow = "1.0.102"
 tokio = { version = "1.50.0", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 byteorder = "1.5.0"
