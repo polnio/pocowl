@@ -1,57 +1,15 @@
-mod value;
-
-pub use value::WaylandValue;
+use pocowl_wlmessage::WaylandMessage;
+pub use pocowl_wlvalue::WaylandValue;
 
 use anyhow::{Context as _, Result};
-use byteorder::{NativeEndian, ReadBytesExt as _};
 use pocowl_protocols_base::WaylandProtocol;
+use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::{io::Read as _, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
 pub trait WaylandState {
     fn get_protocol_of_object(&self, id: u32) -> Option<Rc<dyn WaylandProtocol<Self>>>;
-}
-
-#[derive(Debug)]
-pub struct WaylandMessage {
-    object_id: u32,
-    opcode: u16,
-    data: Vec<u8>,
-}
-impl WaylandMessage {
-    fn from_raw(buf: &mut &[u8]) -> Result<Self> {
-        const HEADER_LEN: usize = 8;
-        if buf.len() < HEADER_LEN {
-            return Err(anyhow::anyhow!("Invalid message: {} bytes", buf.len()));
-        }
-        let object_id = buf.read_u32::<NativeEndian>().unwrap();
-        let opcode = buf.read_u16::<NativeEndian>().unwrap();
-        let mut len = buf.read_u16::<NativeEndian>().unwrap();
-        if len < 8 {
-            return Err(anyhow::anyhow!(
-                "length must be at least 8 bytes, got {}",
-                len
-            ));
-        }
-        len -= 8;
-
-        let mut data = vec![0; len as usize];
-        let m = buf.read(&mut data)?;
-        if m != len as usize {
-            return Err(anyhow::anyhow!(
-                "length bigger than message size: {} > {} bytes",
-                len,
-                m
-            ));
-        }
-        Ok(WaylandMessage {
-            object_id,
-            opcode,
-            data,
-        })
-    }
 }
 
 pub struct WaylandSocket<State: WaylandState> {
@@ -109,7 +67,7 @@ impl<State: WaylandState> WaylandSocket<State> {
                     .state
                     .get_protocol_of_object(msg.object_id)
                     .with_context(|| format!("No protocol found for object {}", msg.object_id))?;
-                p.call(&mut self.state, msg.opcode, &mut data);
+                p.call(&mut self.state, msg.opcode, &mut data, &mut stream);
             }
         }
         println!("Connection closed");

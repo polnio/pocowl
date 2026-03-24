@@ -5,6 +5,9 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+fixed = "1.31.0"
 pocowl-protocols-base.workspace = true
 pocowl-scanner.workspace = true
+pocowl-wlmessage.workspace = true
 pocowl-wlvalue.workspace = true
+tokio = { version = "1.50.0", features = ["net"] }

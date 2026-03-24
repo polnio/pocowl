@@ -1,9 +1,11 @@
 use anyhow::Result;
 use pocowl_protocols::WaylandProtocol;
 use pocowl_protocols::wayland::{WlDisplay, WlDisplayListener, WlRegistry, WlRegistryListener};
+use pocowl_wlmessage::WaylandMessage;
 use pocowl_wlsocket::{WaylandSocket, WaylandState};
 use std::collections::HashMap;
 use std::rc::Rc;
+use tokio::net::UnixStream;
 use tokio::task::LocalSet;
 use tokio_util::sync::CancellationToken;
 
@@ -25,22 +27,33 @@ impl WaylandState for PocoWl {
 }
 
 impl WlRegistryListener for PocoWl {
-    fn bind(&mut self, name: u32, id: u32) -> u32 {
+    fn bind(&mut self, name: u32, id: u32, stream: &mut UnixStream) {
+        _ = name;
+        _ = id;
+        _ = stream;
         todo!()
     }
 }
 
 impl WlDisplayListener for PocoWl {
-    fn sync(&mut self, callback: u32) -> u32 {
+    fn sync(&mut self, callback: u32, stream: &mut UnixStream) {
+        _ = callback;
+        _ = stream;
         // todo!()
         println!("Syncing");
-        0
     }
 
-    fn get_registry(&mut self, registry: u32) -> u32 {
+    fn get_registry(&mut self, registry: u32, stream: &mut UnixStream) {
         self.objects.insert(registry, Rc::new(WlRegistry));
         println!("Added registry {}", registry);
-        0
+        println!("TEST: {}", WlRegistry::NAME);
+        let mut data = Vec::new();
+        data.extend(
+            WlRegistry::global(registry, 1, WlDisplay::NAME.to_owned(), WlDisplay::VERSION)
+                .to_raw(),
+        );
+        stream.try_write(&data).unwrap();
+        // TODO: Pass the UnixSocket to the methods so the compositor can respond
     }
 }
 

@@ -1,3 +1,5 @@
+use tokio::net::UnixStream;
+
 pub trait WaylandProtocol<T> {
-    fn call(&self, state: &mut T, opcode: u16, buf: &mut &[u8]) -> u32;
+    fn call(&self, state: &mut T, opcode: u16, buf: &mut &[u8], stream: &mut UnixStream);
 }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use byteorder::NativeEndian;
 use byteorder::ReadBytesExt as _;
+use fixed::types::I24F8;
 use std::ffi::CString;
 use std::io::Read as _;
 
@@ -55,5 +56,28 @@ impl WaylandValue for String {
         vec.extend(bytes);
         vec.extend(vec![0; real_len - vec.len()]);
         vec
+    }
+}
+impl WaylandValue for I24F8 {
+    fn from_raw(buf: &mut &[u8]) -> Result<Self> {
+        let mut bytes = [0; _];
+        let n = buf.read(&mut bytes)?;
+        if n != 4 {
+            anyhow::bail!("Failed to read 4 bytes");
+        }
+        Ok(I24F8::from_ne_bytes(bytes))
+    }
+
+    fn to_raw(self) -> Vec<u8> {
+        self.to_ne_bytes().to_vec()
+    }
+}
+impl WaylandValue for () {
+    fn from_raw(_: &mut &[u8]) -> Result<Self> {
+        Ok(())
+    }
+
+    fn to_raw(self) -> Vec<u8> {
+        vec![]
     }
 }
