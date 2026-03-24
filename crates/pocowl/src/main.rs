@@ -1,7 +1,6 @@
 use anyhow::Result;
 use pocowl_protocols::WaylandProtocol;
 use pocowl_protocols::wayland::{WlDisplay, WlDisplayListener, WlRegistry, WlRegistryListener};
-use pocowl_wlmessage::WaylandMessage;
 use pocowl_wlsocket::{WaylandSocket, WaylandState};
 use std::collections::HashMap;
 use std::rc::Rc;
