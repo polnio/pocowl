@@ -32,26 +32,27 @@ impl WaylandValue for i32 {
 impl WaylandValue for String {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
         let len = buf.read_u32::<NativeEndian>()?;
-        let mut bytes = vec![0; len as usize];
+        let alen = align(len as usize, 4);
+        let mut bytes = vec![0; alen];
         let n = buf.read(&mut bytes)?;
-        if n != len as usize {
+        if n != alen {
             return Err(anyhow::anyhow!(
                 "length bigger than message size: {} > {} bytes",
-                len,
+                alen,
                 n
             ));
         }
+        bytes.truncate(len as usize);
         let cstr = CString::from_vec_with_nul(bytes)?;
         let s = cstr.into_string()?;
         Ok(s)
     }
     fn to_raw(self) -> Vec<u8> {
         let cstr = CString::new(self).expect("Failed to convert string to CString");
-        let bytes = cstr.into_bytes();
+        let bytes = cstr.into_bytes_with_nul();
         let len = bytes.len() as u32;
         let real_len = align(len as usize + 4, 4);
         let mut vec = Vec::with_capacity(real_len);
-        println!("len: {}, real-len: {}", len, real_len);
         vec.extend(len.to_ne_bytes());
         vec.extend(bytes);
         vec.extend(vec![0; real_len - vec.len()]);

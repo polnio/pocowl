@@ -1,17 +1,18 @@
+mod protocols;
+
 use anyhow::Result;
 use pocowl_protocols::WaylandProtocol;
-use pocowl_protocols::wayland::{WlDisplay, WlDisplayListener, WlRegistry, WlRegistryListener};
-use pocowl_wlsocket::{WaylandSocket, WaylandState};
+use pocowl_protocols::wayland::WlDisplay;
+use pocowl_wlsocket::{WaylandClientState, WaylandSocket, WaylandState};
 use std::collections::HashMap;
 use std::rc::Rc;
-use tokio::net::UnixStream;
 use tokio::task::LocalSet;
 use tokio_util::sync::CancellationToken;
 
-struct PocoWl {
+pub struct PocoWlClient {
     objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>>,
 }
-impl PocoWl {
+impl PocoWlClient {
     fn new() -> Self {
         let mut objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>> = HashMap::new();
         objects.insert(1, Rc::new(WlDisplay));
@@ -19,40 +20,32 @@ impl PocoWl {
     }
 }
 
+struct PocoWl {
+    clients: HashMap<usize, PocoWlClient>,
+}
+impl PocoWl {
+    fn new() -> Self {
+        Self {
+            clients: HashMap::new(),
+        }
+    }
+}
+
 impl WaylandState for PocoWl {
+    type ClientState = PocoWlClient;
+
+    fn get_client_state_mut(&mut self, id: usize) -> Option<&mut Self::ClientState> {
+        self.clients.get_mut(&id)
+    }
+
+    fn add_client(&mut self, id: usize) {
+        self.clients.insert(id, PocoWlClient::new());
+    }
+}
+
+impl WaylandClientState for PocoWlClient {
     fn get_protocol_of_object(&self, id: u32) -> Option<Rc<dyn WaylandProtocol<Self>>> {
         self.objects.get(&id).cloned()
-    }
-}
-
-impl WlRegistryListener for PocoWl {
-    fn bind(&mut self, name: u32, id: u32, stream: &mut UnixStream) {
-        _ = name;
-        _ = id;
-        _ = stream;
-        todo!()
-    }
-}
-
-impl WlDisplayListener for PocoWl {
-    fn sync(&mut self, callback: u32, stream: &mut UnixStream) {
-        _ = callback;
-        _ = stream;
-        // todo!()
-        println!("Syncing");
-    }
-
-    fn get_registry(&mut self, registry: u32, stream: &mut UnixStream) {
-        self.objects.insert(registry, Rc::new(WlRegistry));
-        println!("Added registry {}", registry);
-        println!("TEST: {}", WlRegistry::NAME);
-        let mut data = Vec::new();
-        data.extend(
-            WlRegistry::global(registry, 1, WlDisplay::NAME.to_owned(), WlDisplay::VERSION)
-                .to_raw(),
-        );
-        stream.try_write(&data).unwrap();
-        // TODO: Pass the UnixSocket to the methods so the compositor can respond
     }
 }
 

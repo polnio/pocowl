@@ -1,14 +1,22 @@
+use pocowl_wlclient::WaylandClient;
 use pocowl_wlmessage::WaylandMessage;
 pub use pocowl_wlvalue::WaylandValue;
 
 use anyhow::{Context as _, Result};
 use pocowl_protocols_base::WaylandProtocol;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use tokio::net::{UnixListener, UnixStream};
 
 pub trait WaylandState {
+    type ClientState: WaylandClientState;
+    fn get_client_state_mut(&mut self, id: usize) -> Option<&mut Self::ClientState>;
+    fn add_client(&mut self, id: usize);
+}
+
+pub trait WaylandClientState {
     fn get_protocol_of_object(&self, id: u32) -> Option<Rc<dyn WaylandProtocol<Self>>>;
 }
 
@@ -16,6 +24,8 @@ pub struct WaylandSocket<State: WaylandState> {
     path: PathBuf,
     listener: UnixListener,
     state: State,
+
+    last_client_id: usize,
 }
 impl<State: WaylandState> WaylandSocket<State> {
     fn get_new_socket_path() -> Option<PathBuf> {
@@ -37,6 +47,8 @@ impl<State: WaylandState> WaylandSocket<State> {
             listener,
             path,
             state,
+
+            last_client_id: 0,
         })
     }
 
@@ -50,24 +62,37 @@ impl<State: WaylandState> WaylandSocket<State> {
         }
     }
 
-    async fn handle_connection(&mut self, mut stream: UnixStream) -> Result<()> {
-        let mut buf = [0u8; 512];
+    async fn handle_connection(&mut self, stream: UnixStream) -> Result<()> {
+        let mut client = WaylandClient {
+            stream,
+            id: self.last_client_id,
+        };
+        self.last_client_id += 1;
+        self.state.add_client(client.id);
+        let client_state = self
+            .state
+            .get_client_state_mut(client.id)
+            .context("No client state found")?;
+        let mut buf = VecDeque::<u8>::new();
+        let mut temp_buf = [0u8; 512];
         loop {
-            let n = Self::read_stream(&mut stream, &mut buf).await?;
+            let n = Self::read_stream(&mut client.stream, &mut temp_buf).await?;
             if n == 0 {
                 break;
             }
-            let mut buf = &buf[..n];
-            println!("{:?}", buf);
+            buf.extend(&temp_buf[..n]);
+            // let mut buf = &buf[..n];
+            println!("C -> S: {:?}", buf);
             while !buf.is_empty() {
-                let msg = WaylandMessage::from_raw(&mut buf)?;
+                let Ok(msg) = WaylandMessage::from_raw(&mut buf) else {
+                    println!("{:?}", buf);
+                    break;
+                };
                 println!("Got message: {msg:?}");
-                let mut data = msg.data.as_slice();
-                let p = self
-                    .state
+                let p = client_state
                     .get_protocol_of_object(msg.object_id)
                     .with_context(|| format!("No protocol found for object {}", msg.object_id))?;
-                p.call(&mut self.state, msg.opcode, &mut data, &mut stream);
+                p.call(client_state, msg, &mut client);
             }
         }
         println!("Connection closed");

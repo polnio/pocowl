@@ -11,6 +11,7 @@ authors = ["Po Co<me@polnio.dev>"]
 pocowl-protocols      = { path = "crates/protocols" }
 pocowl-protocols-base = { path = "crates/protocols-base" }
 pocowl-scanner        = { path = "crates/scanner" }
+pocowl-wlclient       = { path = "crates/wlclient" }
 pocowl-wlmessage      = { path = "crates/wlmessage" }
 pocowl-wlsocket       = { path = "crates/wlsocket" }
 pocowl-wlvalue        = { path = "crates/wlvalue" }

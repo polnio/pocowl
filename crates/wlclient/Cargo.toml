@@ -1,9 +1,8 @@
 [package]
-name = "pocowl-protocols-base"
+name = "pocowl-wlclient"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-pocowl-wlclient.workspace = true
-pocowl-wlmessage.workspace = true
+tokio = { version = "1.50.0", features = ["net"] }

@@ -6,6 +6,7 @@ authors.workspace = true
 
 [dependencies]
 pocowl-scanner.workspace = true
+pocowl-wlclient.workspace = true
 pocowl-wlsocket.workspace = true
 pocowl-wlmessage.workspace = true
 pocowl-protocols.workspace = true
