@@ -9,13 +9,15 @@ use std::rc::Rc;
 use tokio::task::LocalSet;
 use tokio_util::sync::CancellationToken;
 
+pub const DISPLAY_OBJECT: WlDisplay = WlDisplay { object_id: 1 };
+
 pub struct PocoWlClient {
     objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>>,
 }
 impl PocoWlClient {
     fn new() -> Self {
         let mut objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>> = HashMap::new();
-        objects.insert(1, Rc::new(WlDisplay));
+        objects.insert(1, Rc::new(DISPLAY_OBJECT));
         Self { objects }
     }
 }

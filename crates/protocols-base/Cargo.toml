@@ -6,4 +6,5 @@ authors.workspace = true
 
 [dependencies]
 pocowl-wlclient.workspace = true
+pocowl-wlvalue.workspace = true
 pocowl-wlmessage.workspace = true

@@ -13,6 +13,7 @@ pub trait WaylandValue: Sized {
     fn from_raw(buf: &mut &[u8]) -> Result<Self>;
     fn to_raw(self) -> Vec<u8>;
 }
+
 impl WaylandValue for u32 {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
         buf.read_u32::<NativeEndian>().map_err(anyhow::Error::from)
@@ -21,6 +22,7 @@ impl WaylandValue for u32 {
         self.to_ne_bytes().to_vec()
     }
 }
+
 impl WaylandValue for i32 {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
         buf.read_i32::<NativeEndian>().map_err(anyhow::Error::from)
@@ -29,6 +31,7 @@ impl WaylandValue for i32 {
         self.to_ne_bytes().to_vec()
     }
 }
+
 impl WaylandValue for String {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
         let len = buf.read_u32::<NativeEndian>()?;
@@ -59,6 +62,7 @@ impl WaylandValue for String {
         vec
     }
 }
+
 impl WaylandValue for I24F8 {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
         let mut bytes = [0; _];
@@ -73,6 +77,7 @@ impl WaylandValue for I24F8 {
         self.to_ne_bytes().to_vec()
     }
 }
+
 impl WaylandValue for () {
     fn from_raw(_: &mut &[u8]) -> Result<Self> {
         Ok(())
@@ -82,3 +87,38 @@ impl WaylandValue for () {
         vec![]
     }
 }
+
+impl<T> WaylandValue for Option<T>
+where
+    T: WaylandValue + Clone,
+{
+    fn from_raw(buf: &mut &[u8]) -> Result<Self> {
+        let data = T::from_raw(buf)?;
+        // FIXME: Find a way to lookup instead of cloning
+        let bytes = data.clone().to_raw();
+        // SAFETY: transmute is safe because the bytes are 32 bit aligned
+        let u32bytes = unsafe { std::mem::transmute::<&[u8], &[u32]>(&bytes) };
+        Ok(u32bytes.iter().any(|&x| x != 0).then_some(data))
+    }
+    fn to_raw(self) -> Vec<u8> {
+        match self {
+            Some(val) => val.to_raw(),
+            None => vec![0; 4],
+        }
+    }
+}
+
+// impl<T, S> WaylandValue for T
+// where
+//     T: WaylandProtocol<S>,
+// {
+//     default fn from_raw(buf: &mut &[u8]) -> Result<Self> {
+//         let id = WaylandValue::from_raw(buf)?;
+//         let protocol = T::new_with_id(id);
+//         Ok(protocol)
+//     }
+//
+//     default fn to_raw(self) -> Vec<u8> {
+//         WaylandValue::to_raw(self.object_id())
+//     }
+// }

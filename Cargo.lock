@@ -146,6 +146,7 @@ dependencies = [
 name = "pocowl-protocols"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "fixed",
  "pocowl-protocols-base",
  "pocowl-scanner",
@@ -160,6 +161,7 @@ version = "0.1.0"
 dependencies = [
  "pocowl-wlclient",
  "pocowl-wlmessage",
+ "pocowl-wlvalue",
 ]
 
 [[package]]
@@ -209,7 +211,6 @@ dependencies = [
  "anyhow",
  "byteorder",
  "fixed",
- "pocowl-protocols-base",
 ]
 
 [[package]]

@@ -44,6 +44,8 @@ struct Arg {
     ty: Type,
     #[serde(rename = "@interface")]
     interface: Option<String>,
+    #[serde(rename = "@allow-null", default)]
+    allow_null: bool,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -101,10 +103,23 @@ fn generate_args<'a>(
                 (name, quote!(u32)),
             ]
         }
+        (Type::NewId | Type::Object, Some(interface)) => {
+            let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
+            let ty = quote::format_ident!("r#{}", ccase!(pascal, &interface));
+            if arg.allow_null {
+                vec![(name, quote!(Option<#ty>))]
+            } else {
+                vec![(name, quote!(#ty))]
+            }
+        }
         _ => {
             let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
             let ty = arg.ty.to_rust_type();
-            vec![(name, ty)]
+            if arg.allow_null {
+                vec![(name, quote!(Option<#ty>))]
+            } else {
+                vec![(name, ty)]
+            }
         }
     })
 }
@@ -146,12 +161,13 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         quote!(let #arg = WaylandValue::from_raw(buf).unwrap();)
                     });
                     Some(quote! {
-                        fn #name(&mut self, object_id: u32, #(#args_name: #args_ty,)* client: &mut WaylandClient);
+                        fn #name(&mut self, object: #struct_name, #(#args_name: #args_ty,)* client: &mut WaylandClient);
                         fn #name_raw(&mut self, message: WaylandMessage, client: &mut WaylandClient) {
                             let mut buf = message.data.as_slice();
                             let buf = &mut buf;
                             #(#raw_args)*
-                            self.#name(message.object_id, #(#args_name,)* client)
+                            let object = #struct_name { object_id: message.object_id };
+                            self.#name(object, #(#args_name,)* client)
                         }
                     })
                 });
@@ -183,10 +199,10 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                     let (args_name, args_ty): (Vec<_>, Vec<_>) = generate_args(event.args.iter()).collect();
                     let name = quote::format_ident!("r#{}", ccase!(snake, &event.name));
                     Some(quote! {
-                        pub fn #name(id_dont_collide_with_args: u32, #(#args_name: #args_ty),*) -> WaylandMessage {
+                        pub fn #name(object_dont_collide_with_args: #struct_name, #(#args_name: #args_ty),*) -> WaylandMessage {
                             let mut buf_dont_collide_with_args = Vec::new();
                             #(buf_dont_collide_with_args.extend(WaylandValue::to_raw(#args_name));)*
-                            WaylandMessage::new(id_dont_collide_with_args, #opcode, buf_dont_collide_with_args)
+                            WaylandMessage::new(object_dont_collide_with_args.object_id, #opcode, buf_dont_collide_with_args)
                         }
                     })
                 });
@@ -206,12 +222,24 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                     .unzip();
 
                 quote! {
-                    #[derive(Copy, Clone)]
-                    pub struct #struct_name;
+                    #[derive(Copy, Clone, Default)]
+                    pub struct #struct_name {
+                        pub object_id: u32,
+                    }
                     impl #struct_name {
                         pub const NAME: &'static str = #xml_name_str;
                         pub const VERSION: u32 = #xml_version;
                         #(#struct_methods)*
+                    }
+                    impl WaylandValue for #struct_name {
+                        fn from_raw(buf: &mut &[u8]) -> anyhow::Result<Self> {
+                            let id = WaylandValue::from_raw(buf)?;
+                            Ok(#struct_name { object_id: id })
+                        }
+
+                        fn to_raw(self) -> Vec<u8> {
+                            WaylandValue::to_raw(self.object_id)
+                        }
                     }
                     impl<T: #trait_name> WaylandProtocol<T> for #struct_name {
                         fn call(&self, state: &mut T, message: WaylandMessage, client: &mut WaylandClient) {
@@ -222,6 +250,9 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         }
                         fn version(&self) -> u32 {
                             Self::VERSION
+                        }
+                        fn object_id(&self) -> u32 {
+                            self.object_id
                         }
                     }
                     pub trait #trait_name {
@@ -238,6 +269,7 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
             let name = quote::format_ident!("{}", ccase!(snake, protocol.name));
             quote! {
                 pub mod #name {
+                    use super::*;
                     use fixed::types::I24F8;
                     // use tokio::net::UnixStream;
                     use pocowl_wlmessage::WaylandMessage;

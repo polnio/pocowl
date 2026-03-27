@@ -5,4 +5,5 @@ pub trait WaylandProtocol<T> {
     fn call(&self, state: &mut T, message: WaylandMessage, client: &mut WaylandClient);
     fn name(&self) -> &'static str;
     fn version(&self) -> u32;
+    fn object_id(&self) -> u32;
 }

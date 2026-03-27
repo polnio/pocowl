@@ -5,9 +5,11 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-fixed = "1.31.0"
 pocowl-protocols-base.workspace = true
 pocowl-wlclient.workspace = true
 pocowl-scanner.workspace = true
 pocowl-wlmessage.workspace = true
 pocowl-wlvalue.workspace = true
+
+fixed = "1.31.0"
+anyhow = "1.0.102"
