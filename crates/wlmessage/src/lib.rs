@@ -1,6 +1,7 @@
 use anyhow::Result;
 use byteorder::{NativeEndian, ReadBytesExt as _};
 use std::io::BufRead;
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 
 #[derive(Debug)]
 pub struct WaylandMessage {
@@ -54,5 +55,27 @@ impl WaylandMessage {
         vec.extend((self.data.len() as u16 + 8).to_ne_bytes());
         vec.extend(self.data.clone());
         vec
+    }
+    pub async fn read(mut stream: impl AsyncRead + Unpin) -> Result<Option<Self>> {
+        let object_id = match stream.read_u32_le().await {
+            Ok(id) => id,
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let opcode = stream.read_u16_le().await?;
+        let mut len = stream.read_u16_le().await?;
+        if len < 8 {
+            anyhow::bail!("length must be at least 8 bytes, got {}", len);
+        }
+        len -= 8;
+
+        let mut data = vec![0; len as usize];
+        let m = stream.read_exact(&mut data).await?;
+        assert_eq!(m, len as usize);
+        Ok(Some(WaylandMessage {
+            object_id,
+            opcode,
+            data,
+        }))
     }
 }

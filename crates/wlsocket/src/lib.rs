@@ -4,7 +4,6 @@ pub use pocowl_wlvalue::WaylandValue;
 
 use anyhow::{Context as _, Result};
 use pocowl_protocols_base::WaylandProtocol;
-use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -73,45 +72,18 @@ impl<State: WaylandState> WaylandSocket<State> {
             .state
             .get_client_state_mut(client.id)
             .context("No client state found")?;
-        let mut buf = VecDeque::<u8>::new();
-        let mut temp_buf = [0u8; 512];
         loop {
-            let n = Self::read_stream(&mut client.stream, &mut temp_buf).await?;
-            if n == 0 {
+            let Some(msg) = WaylandMessage::read(&mut client.stream).await? else {
                 break;
-            }
-            buf.extend(&temp_buf[..n]);
-            // let mut buf = &buf[..n];
-            println!("C -> S: {:?}", buf);
-            while !buf.is_empty() {
-                let Ok(msg) = WaylandMessage::from_raw(&mut buf) else {
-                    println!("{:?}", buf);
-                    break;
-                };
-                println!("Got message: {msg:?}");
-                let p = client_state
-                    .get_protocol_of_object(msg.object_id)
-                    .with_context(|| format!("No protocol found for object {}", msg.object_id))?;
-                p.call(client_state, msg, &mut client);
-            }
+            };
+            println!("Got message: {msg:?}");
+            let p = client_state
+                .get_protocol_of_object(msg.object_id)
+                .with_context(|| format!("No protocol found for object {}", msg.object_id))?;
+            p.call(client_state, msg, &mut client);
         }
         println!("Connection closed");
         Ok(())
-    }
-
-    async fn read_stream(stream: &mut UnixStream, buf: &mut [u8]) -> Result<usize> {
-        loop {
-            stream.readable().await?;
-            match stream.try_read(buf) {
-                Ok(n) => return Ok(n),
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
-        }
     }
 
     pub fn path(&self) -> &Path {

@@ -16,7 +16,7 @@ impl WlDisplayListener for PocoWlClient {
     fn sync(&mut self, object: WlDisplay, callback: WlCallback, client: &mut WaylandClient) {
         _ = object;
         let mut data = Vec::new();
-        // data.extend(WlDisplay::delete_id(object, callback).to_raw());
+        // data.extend(WlDisplay::delete_id(object, callback.object_id).to_raw());
         data.extend(WlCallback::done(callback, Default::default()).to_raw());
         client.stream.try_write(&data).unwrap();
     }
@@ -114,10 +114,6 @@ impl WlRegistryListener for PocoWlClient {
             // TODO: Close socket
             return;
         }
-        println!(
-            "Registry bind {}: {} - {} - {}",
-            id, name, id_interface, id_version
-        );
         self.objects.insert(id, interface);
         // if let Some(registries) = self.clients_registries.get(&client.id) {
         //     for registry in registries {
