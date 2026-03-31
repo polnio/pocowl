@@ -9,7 +9,7 @@ authors = ["Po Co<me@polnio.dev>"]
 
 [workspace.dependencies]
 pocowl-backend        = { path = "crates/backend" }
-pocowl-backend-glfw  = { path = "crates/backend-glfw" }
+pocowl-backend-glfw   = { path = "crates/backend-glfw" }
 pocowl-protocols      = { path = "crates/protocols" }
 pocowl-protocols-base = { path = "crates/protocols-base" }
 pocowl-scanner        = { path = "crates/scanner" }
