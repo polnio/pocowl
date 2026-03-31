@@ -1,6 +1,7 @@
 mod protocols;
 
 use anyhow::Result;
+use pocowl_backend::Backend as _;
 use pocowl_protocols::WaylandProtocol;
 use pocowl_protocols::wayland::WlDisplay;
 use pocowl_wlsocket::{WaylandClientState, WaylandSocket, WaylandState};
@@ -80,6 +81,12 @@ where
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    std::thread::spawn(|| {
+        let mut backend = pocowl_backend_glfw::GlfwBackend::new();
+        println!("Starting backend");
+        backend.run();
+        println!("Backend stopped");
+    });
     let state = PocoWl::new();
     let mut socket = WaylandSocket::create(state)?;
     println!("Listening on {}", socket.path().display());

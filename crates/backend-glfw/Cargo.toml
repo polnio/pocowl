@@ -1,0 +1,9 @@
+[package]
+name = "pocowl-backend-glfw"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+glfw = "0.62.0"
+pocowl-backend.workspace = true

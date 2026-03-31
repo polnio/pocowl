@@ -5,6 +5,8 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+pocowl-backend.workspace = true
+pocowl-backend-glfw.workspace = true
 pocowl-scanner.workspace = true
 pocowl-wlclient.workspace = true
 pocowl-wlsocket.workspace = true

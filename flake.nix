@@ -15,13 +15,32 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          lib = pkgs.lib;
         in
         {
           default = pkgs.mkShell {
             nativeBuildInputs = with pkgs; [
               cargo
               rustc
+              # GLFW
+              cmake
+              pkg-config
+              wayland
+              libxkbcommon
+              libffi
+              libx11
+              libxrandr
+              libxinerama
+              libxcursor
+              libxi
             ];
+            LD_LIBRARY_PATH = lib.makeLibraryPath (
+              with pkgs;
+              [
+                libGL
+                libxkbcommon
+              ]
+            );
           };
         }
       );

@@ -1,0 +1,5 @@
+[package]
+name = "pocowl-backend"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
