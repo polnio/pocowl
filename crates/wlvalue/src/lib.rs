@@ -107,18 +107,3 @@ where
         }
     }
 }
-
-// impl<T, S> WaylandValue for T
-// where
-//     T: WaylandProtocol<S>,
-// {
-//     default fn from_raw(buf: &mut &[u8]) -> Result<Self> {
-//         let id = WaylandValue::from_raw(buf)?;
-//         let protocol = T::new_with_id(id);
-//         Ok(protocol)
-//     }
-//
-//     default fn to_raw(self) -> Vec<u8> {
-//         WaylandValue::to_raw(self.object_id())
-//     }
-// }

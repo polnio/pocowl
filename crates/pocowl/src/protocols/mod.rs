@@ -1,2 +1,2 @@
-mod wayland;
-mod xdg_shell;
+pub mod wayland;
+pub mod xdg_shell;

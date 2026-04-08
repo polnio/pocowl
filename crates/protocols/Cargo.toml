@@ -9,7 +9,10 @@ pocowl-protocols-base.workspace = true
 pocowl-wlclient.workspace = true
 pocowl-scanner.workspace = true
 pocowl-wlmessage.workspace = true
+pocowl-wlstream.workspace = true
 pocowl-wlvalue.workspace = true
 
 fixed = "1.31.0"
 anyhow = "1.0.102"
+num_enum = "0.7.6"
+async-trait = "0.1.89"

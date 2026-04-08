@@ -8,6 +8,7 @@ authors.workspace = true
 pocowl-protocols-base.workspace = true
 pocowl-wlclient.workspace = true
 pocowl-wlmessage.workspace = true
+pocowl-wlstream.workspace = true
 pocowl-wlvalue.workspace = true
 
 anyhow = "1.0.102"

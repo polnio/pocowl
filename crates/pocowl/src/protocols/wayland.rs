@@ -1,32 +1,49 @@
 use crate::DISPLAY_OBJECT;
 use crate::PocoWlClient;
+use memmap::MmapMut;
 use pocowl_protocols::WaylandProtocol;
 use pocowl_protocols::wayland::*;
 use pocowl_protocols::xdg_shell::XdgWmBase;
-use pocowl_wlclient::WaylandClient;
+use pocowl_wlbuffer::WaylandBuffer;
+use std::collections::HashMap;
+use std::os::fd::OwnedFd;
 use std::rc::Rc;
+use tokio::io::AsyncWriteExt as _;
 
-const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Rc<dyn WaylandProtocol<PocoWlClient>>; 3] = [
+const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Rc<dyn WaylandProtocol<PocoWlClient>>; 4] = [
     |id| Rc::new(WlCompositor { object_id: id }),
     |id| Rc::new(WlShm { object_id: id }),
     |id| Rc::new(XdgWmBase { object_id: id }),
+    |id| Rc::new(WlOutput { object_id: id }),
 ];
 
+pub struct PocoWlState {
+    buffers: HashMap<WlBuffer, WaylandBuffer>,
+    shms: HashMap<WlShmPool, MmapMut>,
+    pool_buffers: HashMap<WlShmPool, Vec<WlBuffer>>,
+    surface_buffers: HashMap<WlSurface, WlBuffer>,
+}
+impl PocoWlState {
+    pub fn new() -> Self {
+        Self {
+            buffers: HashMap::new(),
+            shms: HashMap::new(),
+            pool_buffers: HashMap::new(),
+            surface_buffers: HashMap::new(),
+        }
+    }
+}
+
 impl WlDisplayListener for PocoWlClient {
-    fn sync(&mut self, object: WlDisplay, callback: WlCallback, client: &mut WaylandClient) {
+    async fn sync(&mut self, object: WlDisplay, callback: WlCallback) {
         _ = object;
         let mut data = Vec::new();
         // data.extend(WlDisplay::delete_id(object, callback.object_id).to_raw());
         data.extend(WlCallback::done(callback, Default::default()).to_raw());
-        client.stream.try_write(&data).unwrap();
+        let _ = self.client.stream.write(&data).await;
     }
 
-    fn get_registry(
-        &mut self,
-        object: WlDisplay,
-        registry: WlRegistry,
-        client: &mut WaylandClient,
-    ) {
+    async fn get_registry(&mut self, object: WlDisplay, registry: WlRegistry) {
         _ = object;
         self.objects.insert(registry.object_id, Rc::new(registry));
         let mut data = Vec::new();
@@ -42,25 +59,24 @@ impl WlDisplayListener for PocoWlClient {
                 .to_raw(),
             );
         }
-        client.stream.try_write(&data).unwrap();
+        let _ = self.client.stream.write(&data).await;
     }
 }
 
 impl WlRegistryListener for PocoWlClient {
-    fn bind(
+    async fn bind(
         &mut self,
         object: WlRegistry,
         name: u32,
         id_interface: String,
         id_version: u32,
         id: u32,
-        client: &mut WaylandClient,
     ) {
-        // let interface = get_interface(name);
         let Some(interface_factory) = SUPPORTED_INTERFACE_FACTORIES.get(name as usize) else {
-            client
+            let _ = self
+                .client
                 .stream
-                .try_write(
+                .write(
                     &WlDisplay::error(
                         DISPLAY_OBJECT,
                         object.object_id,
@@ -69,15 +85,16 @@ impl WlRegistryListener for PocoWlClient {
                     )
                     .to_raw(),
                 )
-                .unwrap();
+                .await;
             // TODO: Close socket
             return;
         };
         let interface = (interface_factory)(id);
         if id_interface != interface.name() {
-            client
+            let _ = self
+                .client
                 .stream
-                .try_write(
+                .write(
                     &WlDisplay::error(
                         DISPLAY_OBJECT,
                         object.object_id,
@@ -90,14 +107,15 @@ impl WlRegistryListener for PocoWlClient {
                     )
                     .to_raw(),
                 )
-                .unwrap();
+                .await;
             // TODO: Close socket
             return;
         }
         if id_version > interface.version() {
-            client
+            let _ = self
+                .client
                 .stream
-                .try_write(
+                .write(
                     &WlDisplay::error(
                         DISPLAY_OBJECT,
                         object.object_id,
@@ -110,16 +128,45 @@ impl WlRegistryListener for PocoWlClient {
                     )
                     .to_raw(),
                 )
-                .unwrap();
+                .await;
             // TODO: Close socket
             return;
         }
+
+        match id_interface.as_str() {
+            WlShm::NAME => {
+                let _ = self
+                    .client
+                    .stream
+                    .write(&WlShm::format(WlShm { object_id: id }, WlShmFormat::Argb8888).to_raw())
+                    .await;
+            }
+            WlOutput::NAME => {
+                let (x, y, w, h) = self.backend_sender.get_box().await;
+                // FIXME: Make difference between physical and logical size
+                let mut data = Vec::new();
+                let wl_output = WlOutput { object_id: id };
+                data.extend(
+                    WlOutput::geometry(
+                        wl_output,
+                        x as i32,
+                        y as i32,
+                        w as i32,
+                        h as i32,
+                        WlOutputSubpixel::Unknown,
+                        "Not your buisness".to_owned(),
+                        "Not your buisness".to_owned(),
+                        WlOutputTransform::Normal,
+                    )
+                    .to_raw(),
+                );
+                data.extend(WlOutput::done(wl_output).to_raw());
+                let _ = self.client.stream.write(&data).await;
+            }
+            _ => {}
+        }
+
         self.objects.insert(id, interface);
-        // if let Some(registries) = self.clients_registries.get(&client.id) {
-        //     for registry in registries {
-        //         send_supports_interfaces(*registry, client);
-        //     }
-        // }
     }
 }
 
@@ -127,18 +174,18 @@ impl WlCallbackListener for PocoWlClient {}
 
 #[allow(unused_variables)]
 impl WlCompositorListener for PocoWlClient {
-    fn create_surface(&mut self, object: WlCompositor, id: WlSurface, client: &mut WaylandClient) {
-        todo!()
+    async fn create_surface(&mut self, object: WlCompositor, id: WlSurface) {
+        self.objects.insert(id.object_id, Rc::new(id));
     }
 
-    fn create_region(&mut self, object: WlCompositor, id: WlRegion, client: &mut WaylandClient) {
+    async fn create_region(&mut self, object: WlCompositor, id: WlRegion) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlShmPoolListener for PocoWlClient {
-    fn create_buffer(
+    async fn create_buffer(
         &mut self,
         object: WlShmPool,
         id: WlBuffer,
@@ -146,82 +193,98 @@ impl WlShmPoolListener for PocoWlClient {
         width: i32,
         height: i32,
         stride: i32,
-        format: u32,
-        client: &mut WaylandClient,
+        format: WlShmFormat,
     ) {
-        todo!()
+        self.wl_state.buffers.insert(
+            id,
+            WaylandBuffer::new(width as usize, height as usize, stride as usize),
+        );
+        self.wl_state
+            .pool_buffers
+            .entry(object)
+            .or_default()
+            .push(id);
+        self.objects.insert(id.object_id, Rc::new(id));
     }
 
-    fn destroy(&mut self, object: WlShmPool, client: &mut WaylandClient) {
-        todo!()
+    async fn destroy(&mut self, object: WlShmPool) {
+        self.objects.remove(&object.object_id);
+        let _ = self
+            .client
+            .stream
+            .write(&WlDisplay::delete_id(DISPLAY_OBJECT, object.object_id).to_raw())
+            .await;
     }
 
-    fn resize(&mut self, object: WlShmPool, size: i32, client: &mut WaylandClient) {
+    async fn resize(&mut self, object: WlShmPool, size: i32) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlShmListener for PocoWlClient {
-    fn create_pool(
-        &mut self,
-        object: WlShm,
-        id: WlShmPool,
-        fd: (),
-        size: i32,
-        client: &mut WaylandClient,
-    ) {
-        todo!()
+    async fn create_pool(&mut self, object: WlShm, id: WlShmPool, fd: OwnedFd, size: i32) {
+        use std::os::fd::{FromRawFd as _, IntoRawFd as _};
+        let file = unsafe { std::fs::File::from_raw_fd(fd.into_raw_fd()) };
+        let mmap = match unsafe { memmap::MmapOptions::new().len(size as usize).map_mut(&file) } {
+            Ok(mmap) => mmap,
+            Err(err) => {
+                let _ = self
+                    .client
+                    .stream
+                    .write(
+                        &WlDisplay::error(
+                            DISPLAY_OBJECT,
+                            id.object_id,
+                            WlShmError::InvalidFd as u32,
+                            err.to_string(),
+                        )
+                        .to_raw(),
+                    )
+                    .await;
+                return;
+            }
+        };
+        self.wl_state.shms.insert(id, mmap);
+
+        self.objects.insert(id.object_id, Rc::new(id));
     }
 
-    fn release(&mut self, object: WlShm, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlShm) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlBufferListener for PocoWlClient {
-    fn destroy(&mut self, object: WlBuffer, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlBuffer) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlDataOfferListener for PocoWlClient {
-    fn accept(
+    async fn accept(&mut self, object: WlDataOffer, serial: u32, mime_type: Option<String>) {
+        todo!()
+    }
+
+    async fn receive(&mut self, object: WlDataOffer, mime_type: String, fd: OwnedFd) {
+        todo!()
+    }
+
+    async fn destroy(&mut self, object: WlDataOffer) {
+        todo!()
+    }
+
+    async fn finish(&mut self, object: WlDataOffer) {
+        todo!()
+    }
+
+    async fn set_actions(
         &mut self,
         object: WlDataOffer,
-        serial: u32,
-        mime_type: Option<String>,
-        client: &mut WaylandClient,
-    ) {
-        todo!()
-    }
-
-    fn receive(
-        &mut self,
-        object: WlDataOffer,
-        mime_type: String,
-        fd: (),
-        client: &mut WaylandClient,
-    ) {
-        todo!()
-    }
-
-    fn destroy(&mut self, object: WlDataOffer, client: &mut WaylandClient) {
-        todo!()
-    }
-
-    fn finish(&mut self, object: WlDataOffer, client: &mut WaylandClient) {
-        todo!()
-    }
-
-    fn set_actions(
-        &mut self,
-        object: WlDataOffer,
-        dnd_actions: u32,
-        preferred_action: u32,
-        client: &mut WaylandClient,
+        dnd_actions: WlDataDeviceManagerDndAction,
+        preferred_action: WlDataDeviceManagerDndAction,
     ) {
         todo!()
     }
@@ -229,65 +292,61 @@ impl WlDataOfferListener for PocoWlClient {
 
 #[allow(unused_variables)]
 impl WlDataSourceListener for PocoWlClient {
-    fn offer(&mut self, object: WlDataSource, mime_type: String, client: &mut WaylandClient) {
+    async fn offer(&mut self, object: WlDataSource, mime_type: String) {
         todo!()
     }
 
-    fn destroy(&mut self, object: WlDataSource, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlDataSource) {
         todo!()
     }
 
-    fn set_actions(&mut self, object: WlDataSource, dnd_actions: u32, client: &mut WaylandClient) {
+    async fn set_actions(
+        &mut self,
+        object: WlDataSource,
+        dnd_actions: WlDataDeviceManagerDndAction,
+    ) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlDataDeviceListener for PocoWlClient {
-    fn start_drag(
+    async fn start_drag(
         &mut self,
         object: WlDataDevice,
         source: Option<WlDataSource>,
         origin: WlSurface,
         icon: Option<WlSurface>,
         serial: u32,
-        client: &mut WaylandClient,
     ) {
         todo!()
     }
 
-    fn set_selection(
+    async fn set_selection(
         &mut self,
         object: WlDataDevice,
         source: Option<WlDataSource>,
         serial: u32,
-        client: &mut WaylandClient,
     ) {
         todo!()
     }
 
-    fn release(&mut self, object: WlDataDevice, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlDataDevice) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlDataDeviceManagerListener for PocoWlClient {
-    fn create_data_source(
-        &mut self,
-        object: WlDataDeviceManager,
-        id: WlDataSource,
-        client: &mut WaylandClient,
-    ) {
+    async fn create_data_source(&mut self, object: WlDataDeviceManager, id: WlDataSource) {
         todo!()
     }
 
-    fn get_data_device(
+    async fn get_data_device(
         &mut self,
         object: WlDataDeviceManager,
         id: WlDataDevice,
         seat: WlSeat,
-        client: &mut WaylandClient,
     ) {
         todo!()
     }
@@ -295,72 +354,57 @@ impl WlDataDeviceManagerListener for PocoWlClient {
 
 #[allow(unused_variables)]
 impl WlShellListener for PocoWlClient {
-    fn get_shell_surface(
-        &mut self,
-        object: WlShell,
-        id: WlShellSurface,
-        surface: WlSurface,
-        client: &mut WaylandClient,
-    ) {
+    async fn get_shell_surface(&mut self, object: WlShell, id: WlShellSurface, surface: WlSurface) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlShellSurfaceListener for PocoWlClient {
-    fn pong(&mut self, object: WlShellSurface, serial: u32, client: &mut WaylandClient) {
+    async fn pong(&mut self, object: WlShellSurface, serial: u32) {
         todo!()
     }
 
-    fn r#move(
+    async fn r#move(&mut self, object: WlShellSurface, seat: WlSeat, serial: u32) {
+        todo!()
+    }
+
+    async fn resize(
         &mut self,
         object: WlShellSurface,
         seat: WlSeat,
         serial: u32,
-        client: &mut WaylandClient,
+        edges: WlShellSurfaceResize,
     ) {
         todo!()
     }
 
-    fn resize(
-        &mut self,
-        object: WlShellSurface,
-        seat: WlSeat,
-        serial: u32,
-        edges: u32,
-        client: &mut WaylandClient,
-    ) {
+    async fn set_toplevel(&mut self, object: WlShellSurface) {
         todo!()
     }
 
-    fn set_toplevel(&mut self, object: WlShellSurface, client: &mut WaylandClient) {
-        todo!()
-    }
-
-    fn set_transient(
+    async fn set_transient(
         &mut self,
         object: WlShellSurface,
         parent: WlSurface,
         x: i32,
         y: i32,
-        flags: u32,
-        client: &mut WaylandClient,
+        flags: WlShellSurfaceTransient,
     ) {
         todo!()
     }
 
-    fn set_fullscreen(
+    async fn set_fullscreen(
         &mut self,
         object: WlShellSurface,
-        method: u32,
+        method: WlShellSurfaceFullscreenMethod,
         framerate: u32,
         output: Option<WlOutput>,
-        client: &mut WaylandClient,
     ) {
         todo!()
     }
 
-    fn set_popup(
+    async fn set_popup(
         &mut self,
         object: WlShellSurface,
         seat: WlSeat,
@@ -368,218 +412,192 @@ impl WlShellSurfaceListener for PocoWlClient {
         parent: WlSurface,
         x: i32,
         y: i32,
-        flags: u32,
-        client: &mut WaylandClient,
+        flags: WlShellSurfaceTransient,
     ) {
         todo!()
     }
 
-    fn set_maximized(
-        &mut self,
-        object: WlShellSurface,
-        output: Option<WlOutput>,
-        client: &mut WaylandClient,
-    ) {
+    async fn set_maximized(&mut self, object: WlShellSurface, output: Option<WlOutput>) {
         todo!()
     }
 
-    fn set_title(&mut self, object: WlShellSurface, title: String, client: &mut WaylandClient) {
+    async fn set_title(&mut self, object: WlShellSurface, title: String) {
         todo!()
     }
 
-    fn set_class(&mut self, object: WlShellSurface, class_: String, client: &mut WaylandClient) {
+    async fn set_class(&mut self, object: WlShellSurface, class_: String) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlSurfaceListener for PocoWlClient {
-    fn destroy(&mut self, object: WlSurface, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlSurface) {
         todo!()
     }
 
-    fn attach(
-        &mut self,
-        object: WlSurface,
-        buffer: Option<WlBuffer>,
-        x: i32,
-        y: i32,
-        client: &mut WaylandClient,
-    ) {
+    async fn attach(&mut self, object: WlSurface, buffer: Option<WlBuffer>, x: i32, y: i32) {
+        _ = x;
+        _ = y;
+        if let Some(buffer) = buffer {
+            self.wl_state.surface_buffers.insert(object, buffer);
+        } else {
+            self.wl_state.surface_buffers.remove(&object);
+        }
+    }
+
+    async fn damage(&mut self, object: WlSurface, x: i32, y: i32, width: i32, height: i32) {
         todo!()
     }
 
-    fn damage(
-        &mut self,
-        object: WlSurface,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        client: &mut WaylandClient,
-    ) {
+    async fn frame(&mut self, object: WlSurface, callback: WlCallback) {
         todo!()
     }
 
-    fn frame(&mut self, object: WlSurface, callback: WlCallback, client: &mut WaylandClient) {
+    async fn set_opaque_region(&mut self, object: WlSurface, region: Option<WlRegion>) {
         todo!()
     }
 
-    fn set_opaque_region(
-        &mut self,
-        object: WlSurface,
-        region: Option<WlRegion>,
-        client: &mut WaylandClient,
-    ) {
+    async fn set_input_region(&mut self, object: WlSurface, region: Option<WlRegion>) {
         todo!()
     }
 
-    fn set_input_region(
-        &mut self,
-        object: WlSurface,
-        region: Option<WlRegion>,
-        client: &mut WaylandClient,
-    ) {
+    async fn commit(&mut self, object: WlSurface) {
+        let buffer = self
+            .wl_state
+            .surface_buffers
+            .get_mut(&object)
+            .and_then(|wl_buffer| self.wl_state.buffers.get_mut(wl_buffer));
+        let shmem = self
+            .wl_state
+            .surface_buffers
+            .get(&object)
+            .and_then(|wl_buffer| {
+                self.wl_state
+                    .pool_buffers
+                    .iter()
+                    .find_map(|(pool, buffers)| buffers.contains(wl_buffer).then_some(pool))
+            })
+            .and_then(|pool| self.wl_state.shms.get(pool));
+        let Some((buffer, shmem)) = Option::zip(buffer, shmem) else {
+            return;
+        };
+        if buffer.data.len() != shmem.len() {
+            eprintln!(
+                "Commit: buffer size {} != shmem size {}",
+                buffer.data.len(),
+                shmem.len()
+            );
+            return;
+        }
+        // TODO: is it necessary to copy the data?
+        buffer.data = shmem.to_vec();
+        self.backend_sender.draw(0, 0, buffer.clone()).await;
+        // TODO: swap buffers?
+    }
+
+    async fn set_buffer_transform(&mut self, object: WlSurface, transform: WlOutputTransform) {
         todo!()
     }
 
-    fn commit(&mut self, object: WlSurface, client: &mut WaylandClient) {
+    async fn set_buffer_scale(&mut self, object: WlSurface, scale: i32) {
         todo!()
     }
 
-    fn set_buffer_transform(
-        &mut self,
-        object: WlSurface,
-        transform: i32,
-        client: &mut WaylandClient,
-    ) {
+    async fn damage_buffer(&mut self, object: WlSurface, x: i32, y: i32, width: i32, height: i32) {
         todo!()
     }
 
-    fn set_buffer_scale(&mut self, object: WlSurface, scale: i32, client: &mut WaylandClient) {
-        todo!()
-    }
-
-    fn damage_buffer(
-        &mut self,
-        object: WlSurface,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        client: &mut WaylandClient,
-    ) {
-        todo!()
-    }
-
-    fn offset(&mut self, object: WlSurface, x: i32, y: i32, client: &mut WaylandClient) {
+    async fn offset(&mut self, object: WlSurface, x: i32, y: i32) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlSeatListener for PocoWlClient {
-    fn get_pointer(&mut self, object: WlSeat, id: WlPointer, client: &mut WaylandClient) {
+    async fn get_pointer(&mut self, object: WlSeat, id: WlPointer) {
         todo!()
     }
 
-    fn get_keyboard(&mut self, object: WlSeat, id: WlKeyboard, client: &mut WaylandClient) {
+    async fn get_keyboard(&mut self, object: WlSeat, id: WlKeyboard) {
         todo!()
     }
 
-    fn get_touch(&mut self, object: WlSeat, id: WlTouch, client: &mut WaylandClient) {
+    async fn get_touch(&mut self, object: WlSeat, id: WlTouch) {
         todo!()
     }
 
-    fn release(&mut self, object: WlSeat, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlSeat) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlPointerListener for PocoWlClient {
-    fn set_cursor(
+    async fn set_cursor(
         &mut self,
         object: WlPointer,
         serial: u32,
         surface: Option<WlSurface>,
         hotspot_x: i32,
         hotspot_y: i32,
-        client: &mut WaylandClient,
     ) {
         todo!()
     }
 
-    fn release(&mut self, object: WlPointer, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlPointer) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlKeyboardListener for PocoWlClient {
-    fn release(&mut self, object: WlKeyboard, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlKeyboard) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlTouchListener for PocoWlClient {
-    fn release(&mut self, object: WlTouch, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlTouch) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlOutputListener for PocoWlClient {
-    fn release(&mut self, object: WlOutput, client: &mut WaylandClient) {
+    async fn release(&mut self, object: WlOutput) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlRegionListener for PocoWlClient {
-    fn destroy(&mut self, object: WlRegion, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlRegion) {
         todo!()
     }
 
-    fn add(
-        &mut self,
-        object: WlRegion,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        client: &mut WaylandClient,
-    ) {
+    async fn add(&mut self, object: WlRegion, x: i32, y: i32, width: i32, height: i32) {
         todo!()
     }
 
-    fn subtract(
-        &mut self,
-        object: WlRegion,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        client: &mut WaylandClient,
-    ) {
+    async fn subtract(&mut self, object: WlRegion, x: i32, y: i32, width: i32, height: i32) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlSubcompositorListener for PocoWlClient {
-    fn destroy(&mut self, object: WlSubcompositor, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlSubcompositor) {
         todo!()
     }
 
-    fn get_subsurface(
+    async fn get_subsurface(
         &mut self,
         object: WlSubcompositor,
         id: WlSubsurface,
         surface: WlSurface,
         parent: WlSurface,
-        client: &mut WaylandClient,
     ) {
         todo!()
     }
@@ -587,53 +605,38 @@ impl WlSubcompositorListener for PocoWlClient {
 
 #[allow(unused_variables)]
 impl WlSubsurfaceListener for PocoWlClient {
-    fn destroy(&mut self, object: WlSubsurface, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlSubsurface) {
         todo!()
     }
 
-    fn set_position(&mut self, object: WlSubsurface, x: i32, y: i32, client: &mut WaylandClient) {
+    async fn set_position(&mut self, object: WlSubsurface, x: i32, y: i32) {
         todo!()
     }
 
-    fn place_above(
-        &mut self,
-        object: WlSubsurface,
-        sibling: WlSurface,
-        client: &mut WaylandClient,
-    ) {
+    async fn place_above(&mut self, object: WlSubsurface, sibling: WlSurface) {
         todo!()
     }
 
-    fn place_below(
-        &mut self,
-        object: WlSubsurface,
-        sibling: WlSurface,
-        client: &mut WaylandClient,
-    ) {
+    async fn place_below(&mut self, object: WlSubsurface, sibling: WlSurface) {
         todo!()
     }
 
-    fn set_sync(&mut self, object: WlSubsurface, client: &mut WaylandClient) {
+    async fn set_sync(&mut self, object: WlSubsurface) {
         todo!()
     }
 
-    fn set_desync(&mut self, object: WlSubsurface, client: &mut WaylandClient) {
+    async fn set_desync(&mut self, object: WlSubsurface) {
         todo!()
     }
 }
 
 #[allow(unused_variables)]
 impl WlFixesListener for PocoWlClient {
-    fn destroy(&mut self, object: WlFixes, client: &mut WaylandClient) {
+    async fn destroy(&mut self, object: WlFixes) {
         todo!()
     }
 
-    fn destroy_registry(
-        &mut self,
-        object: WlFixes,
-        registry: WlRegistry,
-        client: &mut WaylandClient,
-    ) {
+    async fn destroy_registry(&mut self, object: WlFixes, registry: WlRegistry) {
         todo!()
     }
 }

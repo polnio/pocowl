@@ -5,5 +5,9 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-glfw = "0.62.0"
 pocowl-backend.workspace = true
+pocowl-wlbuffer.workspace = true
+glfw = "0.62.0"
+softbuffer = "0.4.8"
+tokio = { version = "1.50.0", features = ["rt", "sync"] }
+ouroboros = "0.18.5"

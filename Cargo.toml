@@ -13,7 +13,9 @@ pocowl-backend-glfw   = { path = "crates/backend-glfw" }
 pocowl-protocols      = { path = "crates/protocols" }
 pocowl-protocols-base = { path = "crates/protocols-base" }
 pocowl-scanner        = { path = "crates/scanner" }
+pocowl-wlbuffer       = { path = "crates/wlbuffer" }
 pocowl-wlclient       = { path = "crates/wlclient" }
 pocowl-wlmessage      = { path = "crates/wlmessage" }
 pocowl-wlsocket       = { path = "crates/wlsocket" }
+pocowl-wlstream       = { path = "crates/wlstream" }
 pocowl-wlvalue        = { path = "crates/wlvalue" }

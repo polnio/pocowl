@@ -8,6 +8,7 @@ authors.workspace = true
 pocowl-backend.workspace = true
 pocowl-backend-glfw.workspace = true
 pocowl-scanner.workspace = true
+pocowl-wlbuffer.workspace = true
 pocowl-wlclient.workspace = true
 pocowl-wlsocket.workspace = true
 pocowl-wlmessage.workspace = true
@@ -17,3 +18,5 @@ anyhow = "1.0.102"
 tokio = { version = "1.50.0", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 byteorder = "1.5.0"
 tokio-util = "0.7.18"
+shared_memory = "0.12.4"
+memmap = "0.7.0"

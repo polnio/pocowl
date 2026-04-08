@@ -3,3 +3,7 @@ name = "pocowl-backend"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+
+[dependencies]
+pocowl-wlbuffer.workspace = true
+tokio = { version = "1.50.0", features = ["sync"] }

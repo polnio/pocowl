@@ -26,6 +26,7 @@ struct Interface {
 enum MessageWrapper {
     Request(Message),
     Event(Message),
+    Enum(Enum),
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Other,
 }
@@ -46,6 +47,8 @@ struct Arg {
     interface: Option<String>,
     #[serde(rename = "@allow-null", default)]
     allow_null: bool,
+    #[serde(rename = "@enum", default)]
+    enum_: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -59,7 +62,6 @@ enum Type {
     String,
     Array,
     FD,
-    Enum,
 }
 impl Type {
     fn to_rust_type(&self) -> TokenStream2 {
@@ -70,12 +72,26 @@ impl Type {
             Type::Object => quote!(u32),
             Type::NewId => quote!(u32),
             Type::String => quote!(String),
+            Type::FD => quote!(i32),
             // TODO: Handle more types
             Type::Array => quote!(()),
-            Type::FD => quote!(()),
-            Type::Enum => quote!(()),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct Enum {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "entry")]
+    entries: Vec<EnumEntry>,
+}
+#[derive(Debug, Deserialize)]
+struct EnumEntry {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@value")]
+    value: String,
 }
 
 fn deserialize_ignore_any<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
@@ -89,36 +105,63 @@ fn get_protocols(path: impl AsRef<Path>) -> Result<Vec<Protocol>, String> {
     return Ok(vec![protocol]);
 }
 
+macro_rules! generate_ident {
+    ($($name:tt)*) => {{
+        let name = format!($($name)*);
+        let name = if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            "_".to_owned() + &name
+        } else {
+            name
+        };
+        quote::format_ident!("r#{}", name)
+    }};
+}
+
 fn generate_args<'a>(
+    interface: &'a str,
     args: impl Iterator<Item = &'a Arg>,
-) -> impl Iterator<Item = (proc_macro2::Ident, proc_macro2::TokenStream)> {
-    args.flat_map(|arg| match (&arg.ty, &arg.interface) {
-        (Type::NewId, None) => {
-            let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
-            let name_int = quote::format_ident!("r#{}_interface", ccase!(snake, &arg.name));
-            let name_ver = quote::format_ident!("r#{}_version", ccase!(snake, &arg.name));
+) -> impl Iterator<Item = (proc_macro2::Ident, proc_macro2::TokenStream, bool)> {
+    args.flat_map(|arg| match (&arg.ty, &arg.interface, &arg.enum_) {
+        (Type::NewId, None, _) => {
+            let name = generate_ident!("{}", ccase!(snake, &arg.name));
+            let name_int = generate_ident!("{}_interface", ccase!(snake, &arg.name));
+            let name_ver = generate_ident!("{}_version", ccase!(snake, &arg.name));
             vec![
-                (name_int, quote!(String)),
-                (name_ver, quote!(u32)),
-                (name, quote!(u32)),
+                (name_int, quote!(String), false),
+                (name_ver, quote!(u32), false),
+                (name, quote!(u32), false),
             ]
         }
-        (Type::NewId | Type::Object, Some(interface)) => {
-            let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
-            let ty = quote::format_ident!("r#{}", ccase!(pascal, &interface));
+        (Type::NewId | Type::Object, Some(interface), _) => {
+            let name = generate_ident!("{}", ccase!(snake, &arg.name));
+            let ty = generate_ident!("{}", ccase!(pascal, &interface));
             if arg.allow_null {
-                vec![(name, quote!(Option<#ty>))]
+                vec![(name, quote!(Option<#ty>), false)]
             } else {
-                vec![(name, quote!(#ty))]
+                vec![(name, quote!(#ty), false)]
             }
         }
+        (Type::Uint | Type::Int, _, Some(enum_)) => {
+            let (interface, enum_) = enum_.split_once('.').unwrap_or((interface, enum_));
+            let name = generate_ident!("{}", ccase!(snake, &arg.name));
+            let ty = generate_ident!("{}{}", ccase!(pascal, &interface), ccase!(pascal, &enum_));
+            if arg.allow_null {
+                vec![(name, quote!(Option<#ty>), false)]
+            } else {
+                vec![(name, quote!(#ty), false)]
+            }
+        }
+        (Type::FD, _, _) => {
+            let name = generate_ident!("{}", ccase!(snake, &arg.name));
+            vec![(name, quote!(std::os::fd::OwnedFd), true)]
+        }
         _ => {
-            let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
+            let name = generate_ident!("{}", ccase!(snake, &arg.name));
             let ty = arg.ty.to_rust_type();
             if arg.allow_null {
-                vec![(name, quote!(Option<#ty>))]
+                vec![(name, quote!(Option<#ty>), false)]
             } else {
-                vec![(name, ty)]
+                vec![(name, ty, false)]
             }
         }
     })
@@ -129,100 +172,117 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
         .into_iter()
         .map(|protocol| {
             let interfaces = protocol.interfaces.into_iter().map(|interface| {
-                let (requests, events): (Vec<_>, Vec<_>) = interface
-                    .messages
-                    .into_iter()
-                    .partition(|msg| matches!(msg, MessageWrapper::Request(_)));
-
                 let struct_name = quote::format_ident!("{}", ccase!(pascal, &interface.name));
                 let trait_name =
                     quote::format_ident!("{}Listener", ccase!(pascal, &interface.name));
                 let xml_name_str = &interface.name;
                 let xml_version = interface.version;
-                let trait_methods = requests.iter().filter_map(|request| {
+                let trait_methods = interface.messages.iter().filter_map(|request| {
                     let MessageWrapper::Request(request) = request else {
                         return None;
                     };
-                    // let args_name = request.args.iter().map(|arg| {
-                    //     let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
-                    //     quote!(#name,)
-                    // });
-                    // let (args_name, args_ty): (Vec<_>, Vec<_>) = request.args.iter().map(|arg| {
-                    //     let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
-                    //     let ty = arg.ty.to_rust_type();
-                    //     // quote!(#name: #ty,)
-                    //     (name, ty)
-                    // }).collect();
-                    let (args_name, args_ty): (Vec<_>, Vec<_>) = generate_args(request.args.iter()).collect();
-                    let name = quote::format_ident!("r#{}", ccase!(snake, &request.name));
+                    let (args_name, args_ty, is_fd): (Vec<_>, Vec<_>, Vec<_>) = generate_args(&interface.name, request.args.iter()).collect();
+                    let name = generate_ident!("{}", ccase!(snake, &request.name));
                     let name_raw =
-                        quote::format_ident!("r#{}_from_raw", ccase!(snake, &request.name));
-                    let raw_args = args_name.iter().map(|arg| {
-                        quote!(let #arg = WaylandValue::from_raw(buf).unwrap();)
+                        generate_ident!("{}_from_raw", ccase!(snake, &request.name));
+                    let raw_args = Iterator::zip(args_name.iter(), is_fd.iter()).map(|(arg, is_fd)| {
+                        if *is_fd {
+                            quote!(let #arg = fds.pop_front().unwrap();)
+                        } else {
+                            quote!(let #arg = WaylandValue::from_raw(buf).unwrap();)
+                        }
                     });
                     Some(quote! {
-                        fn #name(&mut self, object: #struct_name, #(#args_name: #args_ty,)* client: &mut WaylandClient);
-                        fn #name_raw(&mut self, message: WaylandMessage, client: &mut WaylandClient) {
+                        async fn #name(&mut self, object: #struct_name, #(#args_name: #args_ty,)*);
+                        async fn #name_raw(&mut self, message: WaylandMessage, fds: &mut VecDeque<OwnedFd>) {
                             let mut buf = message.data.as_slice();
                             let buf = &mut buf;
                             #(#raw_args)*
                             let object = #struct_name { object_id: message.object_id };
-                            self.#name(object, #(#args_name,)* client)
+                            self.#name(object, #(#args_name,)*).await
                         }
                     })
                 });
 
-                let struct_methods = events.iter().filter_map(|event| match event {
+                let struct_methods = interface.messages.iter().filter_map(|event| match event {
                     MessageWrapper::Event(event) => Some(event),
                     _ => None,
                 }).enumerate().filter_map(|(i, event)| {
                     let opcode = i as u16;
-                    // let (args_name, args_ty): (Vec<_>, Vec<_>) = event
-                    //     .args
-                    //     .iter()
-                    //     .flat_map(|arg| {
-                    //         match (&arg.ty, &arg.interface) {
-                    //             (Type::NewId, None) => {
-                    //                 let name_uid = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
-                    //                 let name_int = quote::format_ident!("r#{}_interface", ccase!(snake, &arg.name));
-                    //                 let name_ver = quote::format_ident!("r#{}_version", ccase!(snake, &arg.name));
-                    //                 vec![(name_int, quote!(String)), (name_ver, quote!(u32)), (name_uid, quote!(u32))]
-                    //             }
-                    //             _ => {
-                    //                 let name = quote::format_ident!("r#{}", ccase!(snake, &arg.name));
-                    //                 let ty = arg.ty.to_rust_type();
-                    //                 vec![(name, ty)]
-                    //             }
-                    //         }
-                    //     })
-                    //     .collect();
-                    let (args_name, args_ty): (Vec<_>, Vec<_>) = generate_args(event.args.iter()).collect();
-                    let name = quote::format_ident!("r#{}", ccase!(snake, &event.name));
+                    let (args_name, args_ty, args_are_fds): (Vec<_>, Vec<_>, Vec<_>) = generate_args(&interface.name, event.args.iter()).collect();
+                    // FIXME: Handle fds
+                    let name = generate_ident!("{}", ccase!(snake, &event.name));
+                    let raw_args = Iterator::zip(args_name.iter(), args_are_fds.iter()).filter_map(|(arg, is_fd)| {
+                        (!is_fd).then(|| quote!(WaylandValue::to_raw(#arg)))
+                    });
                     Some(quote! {
                         pub fn #name(object_dont_collide_with_args: #struct_name, #(#args_name: #args_ty),*) -> WaylandMessage {
                             let mut buf_dont_collide_with_args = Vec::new();
-                            #(buf_dont_collide_with_args.extend(WaylandValue::to_raw(#args_name));)*
+                            #(buf_dont_collide_with_args.extend(#raw_args);)*
                             WaylandMessage::new(object_dont_collide_with_args.object_id, #opcode, buf_dont_collide_with_args)
                         }
                     })
                 });
 
-                let (trait_accessor_i, trait_accessor_name): (Vec<_>, Vec<_>) = requests
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, request)| {
-                        let MessageWrapper::Request(request) = request else {
-                            return None;
+                let enums = interface.messages.iter().filter_map(|enum_| {
+                    let MessageWrapper::Enum(enum_) = enum_ else {
+                        return None;
+                    };
+                    let whole_name = format!("{}_{}", interface.name, enum_.name);
+                    let name = generate_ident!("{}", ccase!(pascal, &whole_name));
+                    let entries = enum_.entries.iter().filter_map(|entry| {
+                        let name = generate_ident!("{}", ccase!(pascal, &entry.name));
+                        let value = if let Some(hex) = entry.value.strip_prefix("0x") {
+                            u32::from_str_radix(hex, 16)
+                        } else {
+                            entry.value.parse()
                         };
-                        Some((
+                        let value = match value {
+                            Ok(value) => value,
+                            Err(_) => {
+                                eprintln!("Invalid value for enum {}: {}", whole_name, entry.value);
+                                return None;
+                            },
+                        };
+                        Some(quote!(#name = #value,))
+                    });
+                    Some(quote! {
+                        #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, num_enum::TryFromPrimitive)]
+                        #[repr(u32)]
+                        pub enum #name {
+                            #(#entries)*
+                        }
+                        impl WaylandValue for #name {
+                            fn from_raw(buf: &mut &[u8]) -> anyhow::Result<Self> {
+                                let value: u32 = WaylandValue::from_raw(buf)?;
+                                anyhow::Context::context(#name::try_from(value), "invalid enum value")
+                            }
+                            fn to_raw(self) -> Vec<u8> {
+                                let value = self as u32;
+                                WaylandValue::to_raw(value)
+                            }
+                        }
+                    })
+                });
+
+                let (trait_accessor_i, trait_accessor_name): (Vec<_>, Vec<_>) = interface.messages
+                    .iter()
+                    .filter_map(|message| match message {
+                        MessageWrapper::Request(request) => Some(request),
+                        _ => None,
+                    })
+                    .enumerate()
+                    .map(|(i, request)| {
+                        (
                             i as u16,
-                            quote::format_ident!("r#{}_from_raw", ccase!(snake, &request.name)),
-                        ))
+                            generate_ident!("{}_from_raw", ccase!(snake, &request.name)),
+                        )
                     })
                     .unzip();
 
                 quote! {
-                    #[derive(Copy, Clone, Default)]
+                    #(#enums)*
+                    #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
                     pub struct #struct_name {
                         pub object_id: u32,
                     }
@@ -241,9 +301,10 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                             WaylandValue::to_raw(self.object_id)
                         }
                     }
+                    #[async_trait::async_trait(?Send)]
                     impl<T: #trait_name> WaylandProtocol<T> for #struct_name {
-                        fn call(&self, state: &mut T, message: WaylandMessage, client: &mut WaylandClient) {
-                            state.call(message, client)
+                        async fn call(&self, state: &mut T, message: WaylandMessage, fds: &mut VecDeque<OwnedFd>) {
+                            state.call(message, fds).await
                         }
                         fn name(&self) -> &'static str {
                             Self::NAME
@@ -257,9 +318,9 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                     }
                     pub trait #trait_name {
                         #(#trait_methods)*
-                        fn call(&mut self, message: WaylandMessage, client: &mut WaylandClient) {
+                        async fn call(&mut self, message: WaylandMessage, fds: &mut VecDeque<OwnedFd>) {
                             match message.opcode {
-                                #(#trait_accessor_i => self.#trait_accessor_name(message, client),)*
+                                #(#trait_accessor_i => self.#trait_accessor_name(message, fds).await,)*
                                 _ => {},
                             }
                         }
@@ -271,11 +332,12 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                 pub mod #name {
                     use super::*;
                     use fixed::types::I24F8;
-                    // use tokio::net::UnixStream;
                     use pocowl_wlmessage::WaylandMessage;
                     use pocowl_wlvalue::WaylandValue;
                     use pocowl_protocols_base::WaylandProtocol;
                     use pocowl_wlclient::WaylandClient;
+                    use std::collections::VecDeque;
+                    use std::os::fd::OwnedFd;
                     #(#interfaces)*
                 }
             }
@@ -294,6 +356,5 @@ pub fn scan_protocol(input: TokenStream) -> TokenStream {
         }
     };
     let tt = generate_protocols(protocols);
-    // println!("{}", tt);
     tt.into()
 }

@@ -1,8 +1,5 @@
 [package]
-name = "pocowl-wlclient"
+name = "pocowl-wlbuffer"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-
-[dependencies]
-pocowl-wlstream.workspace = true
