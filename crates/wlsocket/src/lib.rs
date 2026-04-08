@@ -1,10 +1,10 @@
-use pocowl_wlclient::WaylandClient;
-use pocowl_wlmessage::WaylandMessage;
-use pocowl_wlstream::WaylandStream;
 pub use pocowl_wlvalue::WaylandValue;
 
 use anyhow::{Context as _, Result};
 use pocowl_protocols_base::WaylandProtocol;
+use pocowl_wlclient::WaylandClient;
+use pocowl_wlmessage::WaylandMessage;
+use pocowl_wlstream::WaylandStream;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;

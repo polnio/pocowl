@@ -12,5 +12,5 @@ pocowl-wlstream.workspace = true
 pocowl-wlvalue.workspace = true
 
 anyhow = "1.0.102"
-tokio = { version = "1.50.0", features = ["io-util", "macros", "net", "sync"] }
+tokio = { version = "1.50.0", features = ["io-util", "macros", "net"] }
 byteorder = "1.5.0"
