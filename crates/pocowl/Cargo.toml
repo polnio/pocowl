@@ -16,3 +16,4 @@ anyhow = "1.0.102"
 memmap = "0.7.0"
 tokio = { version = "1.50.0", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tokio-util = "0.7.18"
+crossbeam = "0.8.4"

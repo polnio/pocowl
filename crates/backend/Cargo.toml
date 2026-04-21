@@ -5,5 +5,5 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+crossbeam = "0.8.4"
 pocowl-wlbuffer.workspace = true
-tokio = { version = "1.50.0", features = ["sync"] }

@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use tokio::io::AsyncWriteExt as _;
 use tokio::runtime::Handle;
-use tokio::task::LocalSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocols::wayland::PocoWlState;
@@ -106,23 +105,24 @@ impl WaylandClientState for PocoWlClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let local = LocalSet::new();
     let cancel = CancellationToken::new();
 
-    let (mut backend, backend_sender) = pocowl_backend_glfw::GlfwBackend::new_pair();
+    let (backend_tx, backend_rx) = crossbeam::channel::unbounded();
+    let mut backend = pocowl_backend_glfw::GlfwBackend {};
+    let backend_sender = pocowl_backend::BackendSender::new(backend_tx);
     let state = PocoWl::new(backend_sender);
     let mut socket = WaylandSocket::create(state)?;
     println!("Listening on {}", socket.path().display());
 
-    local.spawn_local(async move {
+    let backend_task = tokio::task::spawn_blocking(move || {
         println!("Starting backend");
-        backend.run().await;
+        backend.run(backend_rx);
         println!("Backend stopped");
     });
-    local.spawn_local(async move {
-        socket.run().await;
-    });
-    local.spawn_local({
+
+    let socket_task = socket.run();
+
+    let cancel_task = tokio::task::spawn({
         let cancel = cancel.clone();
         async move {
             let _ = tokio::signal::ctrl_c().await;
@@ -130,6 +130,10 @@ async fn main() -> Result<()> {
         }
     });
 
-    cancel.run_until_cancelled(local).await;
+    cancel
+        .run_until_cancelled(async move {
+            let _ = tokio::join!(backend_task, socket_task, cancel_task);
+        })
+        .await;
     Ok(())
 }

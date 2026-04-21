@@ -142,7 +142,7 @@ impl WlRegistryListener for PocoWlClient {
                     .await;
             }
             WlOutput::NAME => {
-                let (x, y, w, h) = self.backend_sender.get_box().await;
+                let (x, y, w, h) = self.backend_sender.get_box();
                 // FIXME: Make difference between physical and logical size
                 let mut data = Vec::new();
                 let wl_output = WlOutput { object_id: id };
@@ -492,7 +492,7 @@ impl WlSurfaceListener for PocoWlClient {
         }
         // TODO: is it necessary to copy the data?
         buffer.data = shmem.to_vec();
-        self.backend_sender.draw(0, 0, buffer.clone()).await;
+        self.backend_sender.draw(0, 0, buffer.clone());
         // TODO: swap buffers?
     }
 

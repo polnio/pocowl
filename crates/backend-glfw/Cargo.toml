@@ -9,4 +9,4 @@ pocowl-backend.workspace = true
 glfw = "0.62.0"
 ouroboros = "0.18.5"
 softbuffer = "0.4.8"
-tokio = { version = "1.50.0", features = ["rt", "sync"] }
+crossbeam = "0.8.4"

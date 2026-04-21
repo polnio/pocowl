@@ -1,9 +1,8 @@
+use crossbeam::channel::Receiver;
 use glfw::Context as _;
 use ouroboros::self_referencing;
-use pocowl_backend::{Backend, BackendSender, Message};
+use pocowl_backend::{Backend, Message};
 use std::num::NonZeroU32;
-use std::ops::{Deref, DerefMut};
-use tokio::sync::mpsc::Receiver;
 
 #[self_referencing]
 pub struct GlfwBackendWindow {
@@ -12,24 +11,21 @@ pub struct GlfwBackendWindow {
     #[covariant]
     surface: softbuffer::Surface<&'this glfw::PWindow, &'this glfw::PWindow>,
 }
-pub struct GlfwBackend {
-    rx: Receiver<Message>,
-    glfw: Glfw,
-    events: GlfwReceiver<(f64, glfw::WindowEvent)>,
-    window: GlfwBackendWindow,
-}
+pub struct GlfwBackend;
 impl GlfwBackend {
-    fn new(rx: Receiver<Message>) -> Self {
-        let glfw = glfw::init(glfw::fail_on_errors).expect("Failed to init GLFW");
-        let mut glfw = Glfw(glfw);
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn run(&mut self, rx: Receiver<Message>) {
+        let mut glfw = glfw::init(glfw::fail_on_errors).expect("Failed to init GLFW");
         let (mut window, events) = glfw
             .create_window(800, 600, "GLFW", glfw::WindowMode::Windowed)
             .expect("Failed to create GLFW window");
-        let events = GlfwReceiver(events);
         window.set_size_polling(true);
         window.make_current();
 
-        let window = GlfwBackendWindow::new(window, |window| {
+        let mut window = GlfwBackendWindow::new(window, |window| {
             let sbctx =
                 softbuffer::Context::new(window).expect("Failed to create softbuffer context");
             let surface =
@@ -37,33 +33,52 @@ impl GlfwBackend {
             surface
         });
 
-        Self {
-            rx,
-            glfw,
-            events,
-            window,
-        }
-    }
-
-    async fn run(&mut self) {
-        self.window.with_surface_mut(|surface| {
+        window.with_surface_mut(|surface| {
             surface
                 .resize(NonZeroU32::new(800).unwrap(), NonZeroU32::new(600).unwrap())
                 .unwrap();
+            surface.buffer_mut().unwrap().present().unwrap();
         });
 
-        while !self.window.borrow_window().should_close() {
-            tokio::select! {
-                events = self.glfw.get_events(&self.events) =>  self.handle_events(&events),
-                Some(message) = self.rx.recv() => self.handle_message(message)
+        let window = std::sync::Arc::new(std::sync::Mutex::new(window));
+
+        let (events_tx, events_rx) = crossbeam::channel::unbounded::<Vec<glfw::WindowEvent>>();
+
+        std::thread::spawn({
+            let window = window.clone();
+            move || {
+                loop {
+                    let c = crossbeam::select! {
+                        recv(events_rx) -> events => Self::handle_events(
+                            &events.unwrap_or_else(|_| Vec::new()),
+                            &mut window.lock().unwrap()
+                        ),
+                        recv(rx) -> message => Self::handle_message(
+                            message.unwrap_or(Message::Quit),
+                            &mut window.lock().unwrap()
+                        ),
+                    };
+                    if !c {
+                        break;
+                    }
+                }
             }
+        });
+
+        while !window.lock().unwrap().borrow_window().should_close() {
+            glfw.wait_events();
+
+            let events: Vec<_> = glfw::flush_messages(&events).map(|(_, e)| e).collect();
+            if events_tx.send(events).is_err() {
+                break;
+            };
         }
     }
 
-    fn handle_events(&mut self, events: &[glfw::WindowEvent]) {
+    fn handle_events(events: &[glfw::WindowEvent], window: &mut GlfwBackendWindow) -> bool {
         for event in events {
             match event {
-                glfw::WindowEvent::Size(w, h) => self.window.with_surface_mut(|surface| {
+                glfw::WindowEvent::Size(w, h) => window.with_surface_mut(|surface| {
                     surface
                         .resize(
                             NonZeroU32::new(*w as u32).unwrap(),
@@ -74,10 +89,11 @@ impl GlfwBackend {
                 _ => {}
             }
         }
+        true
     }
-    fn handle_message(&mut self, message: Message) {
+    fn handle_message(message: Message, window: &mut GlfwBackendWindow) -> bool {
         match message {
-            Message::Draw { x, y, buffer } => self.window.with_surface_mut(|surface| {
+            Message::Draw { x, y, buffer } => window.with_surface_mut(|surface| {
                 let x = x as usize;
                 let y = y as usize;
                 let mut wbuffer = surface.buffer_mut().unwrap();
@@ -99,65 +115,20 @@ impl GlfwBackend {
                 wbuffer.present().unwrap();
             }),
             Message::GetBox { resp } => {
-                let (w, h) = self.window.borrow_window().get_size();
+                let (w, h) = window.borrow_window().get_size();
                 let _ = resp.send((0, 0, w as u32, h as u32));
             }
+            Message::Quit => {
+                unsafe { glfw::ffi::glfwPostEmptyEvent() };
+                return false;
+            }
         }
+        true
     }
 }
 
 impl Backend for GlfwBackend {
-    fn new_pair() -> (Self, BackendSender)
-    where
-        Self: Sized,
-    {
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
-        (Self::new(rx), BackendSender::new(tx))
-    }
-
-    async fn run(&mut self) {
-        GlfwBackend::run(self).await;
+    fn run(&mut self, rx: Receiver<Message>) {
+        GlfwBackend::run(self, rx);
     }
 }
-
-struct Glfw(glfw::Glfw);
-impl Glfw {
-    async fn get_events(
-        &mut self,
-        events_rx: &GlfwReceiver<(f64, glfw::WindowEvent)>,
-    ) -> Vec<glfw::WindowEvent> {
-        let mut events = Vec::new();
-        while events.is_empty() {
-            self.0.poll_events();
-            events = glfw::flush_messages(events_rx).map(|(_, e)| e).collect();
-            tokio::task::yield_now().await;
-        }
-        events
-    }
-}
-impl Deref for Glfw {
-    type Target = glfw::Glfw;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for Glfw {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-unsafe impl Send for Glfw {}
-struct GlfwReceiver<T>(glfw::GlfwReceiver<T>);
-impl<T> Deref for GlfwReceiver<T> {
-    type Target = glfw::GlfwReceiver<T>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl<T> DerefMut for GlfwReceiver<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-unsafe impl<T> Send for GlfwReceiver<T> {}
-unsafe impl<T> Sync for GlfwReceiver<T> {}

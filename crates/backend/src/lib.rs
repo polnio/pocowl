@@ -1,11 +1,8 @@
+use crossbeam::channel::{Receiver, Sender};
 use pocowl_wlbuffer::WaylandBuffer;
-use tokio::sync::mpsc::Sender;
 
 pub trait Backend {
-    fn new_pair() -> (Self, BackendSender)
-    where
-        Self: Sized;
-    fn run(&mut self) -> impl std::future::Future<Output = ()> + Send;
+    fn run(&mut self, rx: Receiver<Message>);
 }
 
 pub struct BackendSender {
@@ -15,13 +12,13 @@ impl BackendSender {
     pub fn new(tx: Sender<Message>) -> Self {
         Self { tx }
     }
-    pub async fn draw(&self, x: u32, y: u32, buffer: WaylandBuffer) {
-        let _ = self.tx.send(Message::Draw { x, y, buffer }).await;
+    pub fn draw(&self, x: u32, y: u32, buffer: WaylandBuffer) {
+        let _ = self.tx.send(Message::Draw { x, y, buffer });
     }
-    pub async fn get_box(&self) -> (u32, u32, u32, u32) {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let _ = self.tx.send(Message::GetBox { resp: tx }).await;
-        rx.await.unwrap()
+    pub fn get_box(&self) -> (u32, u32, u32, u32) {
+        let (tx, rx) = crossbeam::channel::bounded(1);
+        let _ = self.tx.send(Message::GetBox { resp: tx });
+        rx.recv().unwrap()
     }
 }
 
@@ -35,6 +32,7 @@ pub enum Message {
     GetBox {
         resp: Responder<(u32, u32, u32, u32)>,
     },
+    Quit,
 }
 
-pub type Responder<T> = tokio::sync::oneshot::Sender<T>;
+pub type Responder<T> = crossbeam::channel::Sender<T>;
