@@ -39,7 +39,7 @@ impl WlDisplayListener for PocoWlClient {
         _ = object;
         let mut data = Vec::new();
         // data.extend(WlDisplay::delete_id(object, callback.object_id).to_raw());
-        data.extend(WlCallback::done(callback, Default::default()).to_raw());
+        data.extend(callback.done(Default::default()).to_raw());
         let _ = self.client.stream.write(&data).await;
     }
 
@@ -50,13 +50,13 @@ impl WlDisplayListener for PocoWlClient {
         for (name, interface_factory) in SUPPORTED_INTERFACE_FACTORIES.iter().enumerate() {
             let interface = (interface_factory)(registry.object_id);
             data.extend(
-                WlRegistry::global(
-                    registry,
-                    name as u32,
-                    interface.name().to_owned(),
-                    interface.version(),
-                )
-                .to_raw(),
+                registry
+                    .global(
+                        name as u32,
+                        interface.name().to_owned(),
+                        interface.version(),
+                    )
+                    .to_raw(),
             );
         }
         let _ = self.client.stream.write(&data).await;
@@ -77,13 +77,13 @@ impl WlRegistryListener for PocoWlClient {
                 .client
                 .stream
                 .write(
-                    &WlDisplay::error(
-                        DISPLAY_OBJECT,
-                        object.object_id,
-                        0,
-                        format!("Invalid interface name: {}", name,),
-                    )
-                    .to_raw(),
+                    &DISPLAY_OBJECT
+                        .error(
+                            object.object_id,
+                            0,
+                            format!("Invalid interface name: {}", name,),
+                        )
+                        .to_raw(),
                 )
                 .await;
             // TODO: Close socket
@@ -95,17 +95,17 @@ impl WlRegistryListener for PocoWlClient {
                 .client
                 .stream
                 .write(
-                    &WlDisplay::error(
-                        DISPLAY_OBJECT,
-                        object.object_id,
-                        0,
-                        format!(
-                            "Expected interface {}, found {}",
-                            interface.name(),
-                            id_interface
-                        ),
-                    )
-                    .to_raw(),
+                    &DISPLAY_OBJECT
+                        .error(
+                            object.object_id,
+                            0,
+                            format!(
+                                "Expected interface {}, found {}",
+                                interface.name(),
+                                id_interface
+                            ),
+                        )
+                        .to_raw(),
                 )
                 .await;
             // TODO: Close socket
@@ -116,17 +116,17 @@ impl WlRegistryListener for PocoWlClient {
                 .client
                 .stream
                 .write(
-                    &WlDisplay::error(
-                        DISPLAY_OBJECT,
-                        object.object_id,
-                        0,
-                        format!(
-                            "Expected interface version < {}, found {}",
-                            interface.version(),
-                            id_version
-                        ),
-                    )
-                    .to_raw(),
+                    &DISPLAY_OBJECT
+                        .error(
+                            object.object_id,
+                            0,
+                            format!(
+                                "Expected interface version < {}, found {}",
+                                interface.version(),
+                                id_version
+                            ),
+                        )
+                        .to_raw(),
                 )
                 .await;
             // TODO: Close socket
@@ -138,7 +138,11 @@ impl WlRegistryListener for PocoWlClient {
                 let _ = self
                     .client
                     .stream
-                    .write(&WlShm::format(WlShm { object_id: id }, WlShmFormat::Argb8888).to_raw())
+                    .write(
+                        &WlShm { object_id: id }
+                            .format(WlShmFormat::Argb8888)
+                            .to_raw(),
+                    )
                     .await;
             }
             WlOutput::NAME => {
@@ -147,20 +151,20 @@ impl WlRegistryListener for PocoWlClient {
                 let mut data = Vec::new();
                 let wl_output = WlOutput { object_id: id };
                 data.extend(
-                    WlOutput::geometry(
-                        wl_output,
-                        x as i32,
-                        y as i32,
-                        w as i32,
-                        h as i32,
-                        WlOutputSubpixel::Unknown,
-                        "Not your buisness".to_owned(),
-                        "Not your buisness".to_owned(),
-                        WlOutputTransform::Normal,
-                    )
-                    .to_raw(),
+                    wl_output
+                        .geometry(
+                            x as i32,
+                            y as i32,
+                            w as i32,
+                            h as i32,
+                            WlOutputSubpixel::Unknown,
+                            "Not your buisness".to_owned(),
+                            "Not your buisness".to_owned(),
+                            WlOutputTransform::Normal,
+                        )
+                        .to_raw(),
                 );
-                data.extend(WlOutput::done(wl_output).to_raw());
+                data.extend(wl_output.done().to_raw());
                 let _ = self.client.stream.write(&data).await;
             }
             _ => {}
@@ -212,7 +216,7 @@ impl WlShmPoolListener for PocoWlClient {
         let _ = self
             .client
             .stream
-            .write(&WlDisplay::delete_id(DISPLAY_OBJECT, object.object_id).to_raw())
+            .write(&DISPLAY_OBJECT.delete_id(object.object_id).to_raw())
             .await;
     }
 
@@ -233,13 +237,9 @@ impl WlShmListener for PocoWlClient {
                     .client
                     .stream
                     .write(
-                        &WlDisplay::error(
-                            DISPLAY_OBJECT,
-                            id.object_id,
-                            WlShmError::InvalidFd as u32,
-                            err.to_string(),
-                        )
-                        .to_raw(),
+                        &DISPLAY_OBJECT
+                            .error(id.object_id, WlShmError::InvalidFd as u32, err.to_string())
+                            .to_raw(),
                     )
                     .await;
                 return;

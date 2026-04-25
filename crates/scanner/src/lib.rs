@@ -216,10 +216,10 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         (!is_fd).then(|| quote!(WaylandValue::to_raw(#arg)))
                     });
                     Some(quote! {
-                        pub fn #name(object_dont_collide_with_args: #struct_name, #(#args_name: #args_ty),*) -> WaylandMessage {
+                        pub fn #name(self, #(#args_name: #args_ty),*) -> WaylandMessage {
                             let mut buf_dont_collide_with_args = Vec::new();
                             #(buf_dont_collide_with_args.extend(#raw_args);)*
-                            WaylandMessage::new(object_dont_collide_with_args.object_id, #opcode, buf_dont_collide_with_args)
+                            WaylandMessage::new(self.object_id, #opcode, buf_dont_collide_with_args)
                         }
                     })
                 });

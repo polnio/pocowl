@@ -30,13 +30,25 @@ impl XdgWmBaseListener for PocoWlClient {
         todo!();
     }
 
-    async fn get_xdg_surface(&mut self, object: XdgWmBase, id: XdgSurface, surface: WlSurface) {
-        self.xdg_shell_state.surface_map.insert(id, surface);
-        self.objects.insert(id.object_id, Rc::new(id));
+    async fn get_xdg_surface(
+        &mut self,
+        object: XdgWmBase,
+        xdg_surface: XdgSurface,
+        surface: WlSurface,
+    ) {
+        self.xdg_shell_state
+            .surface_map
+            .insert(xdg_surface, surface);
+        self.objects
+            .insert(xdg_surface.object_id, Rc::new(xdg_surface));
         let _ = self
             .client
             .stream
-            .write(&XdgSurface::configure(id, self.xdg_shell_state.next_serial).to_raw())
+            .write(
+                &xdg_surface
+                    .configure(self.xdg_shell_state.next_serial)
+                    .to_raw(),
+            )
             .await;
         self.xdg_shell_state.next_serial += 1;
     }

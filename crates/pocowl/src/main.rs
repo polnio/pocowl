@@ -81,13 +81,13 @@ impl WaylandClientState for PocoWlClient {
                     .client
                     .stream
                     .write(
-                        &WlDisplay::error(
-                            DISPLAY_OBJECT,
-                            id,
-                            WlDisplayError::InvalidObject as u32,
-                            format!("Invalid object id: {}", id),
-                        )
-                        .to_raw(),
+                        &DISPLAY_OBJECT
+                            .error(
+                                id,
+                                WlDisplayError::InvalidObject as u32,
+                                format!("Invalid object id: {}", id),
+                            )
+                            .to_raw(),
                     )
                     .await;
             });
