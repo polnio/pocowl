@@ -31,28 +31,30 @@ pub struct WaylandSocket<State: WaylandState> {
     last_client_id: usize,
 }
 impl<State: WaylandState> WaylandSocket<State> {
-    fn get_new_socket_path() -> Option<PathBuf> {
+    fn get_new_socket_path() -> Option<(PathBuf, String)> {
         let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
         let runtime_dir = PathBuf::from(runtime_dir);
         for display in 1..10 {
             let path = runtime_dir.join(format!("wayland-{}", display));
             if !path.exists() {
-                return Some(path);
+                let env = format!("WAYLAND_DISPLAY=wayland-{}", display);
+                return Some((path, env));
             }
         }
         None
     }
 
-    pub fn create(state: State) -> Result<Self> {
-        let path = Self::get_new_socket_path().context("No socket found")?;
+    pub fn create(state: State) -> Result<(Self, String)> {
+        let (path, env) = Self::get_new_socket_path().context("No socket found")?;
         let listener = UnixListener::bind(&path).context("Failed to bind socket")?;
-        Ok(Self {
+        let wayland_socket = Self {
             listener,
             path,
             state,
 
             last_client_id: 0,
-        })
+        };
+        Ok((wayland_socket, env))
     }
 
     pub async fn run(&mut self) {

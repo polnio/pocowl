@@ -111,8 +111,8 @@ async fn main() -> Result<()> {
     let mut backend = pocowl_backend_glfw::GlfwBackend {};
     let backend_sender = pocowl_backend::BackendSender::new(backend_tx);
     let state = PocoWl::new(backend_sender);
-    let mut socket = WaylandSocket::create(state)?;
-    println!("Listening on {}", socket.path().display());
+    let (mut socket, wenv) = WaylandSocket::create(state)?;
+    println!("Listening on {}", wenv);
 
     let backend_task = tokio::task::spawn_blocking(move || {
         println!("Starting backend");
