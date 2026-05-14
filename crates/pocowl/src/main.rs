@@ -9,7 +9,6 @@ use pocowl_wlsocket::{WaylandClientState, WaylandSocket, WaylandState};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt as _;
-use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 
 use crate::protocols::wayland::PocoWlState;
@@ -66,24 +65,20 @@ impl WaylandClientState for PocoWlClient {
     fn get_protocol_of_object(&self, id: u32) -> Option<Box<dyn WaylandProtocol<Self> + Send>> {
         self.objects.get(&id).map(|p| p.copy())
     }
-    fn on_invalid_object(&mut self, id: u32) {
-        tokio::task::block_in_place(move || {
-            Handle::current().block_on(async move {
-                let _ = self
-                    .client
-                    .stream
-                    .write(
-                        &DISPLAY_OBJECT
-                            .error(
-                                id,
-                                WlDisplayError::InvalidObject as u32,
-                                format!("Invalid object id: {}", id),
-                            )
-                            .to_raw(),
+    async fn on_invalid_object(&mut self, id: u32) {
+        let _ = self
+            .client
+            .stream
+            .write(
+                &DISPLAY_OBJECT
+                    .error(
+                        id,
+                        WlDisplayError::InvalidObject as u32,
+                        format!("Invalid object id: {}", id),
                     )
-                    .await;
-            });
-        });
+                    .to_raw(),
+            )
+            .await;
     }
 }
 

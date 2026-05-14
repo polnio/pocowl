@@ -20,7 +20,7 @@ pub trait WaylandState {
 pub trait WaylandClientState: Send {
     fn get_client_mut(&mut self) -> &mut WaylandClient;
     fn get_protocol_of_object(&self, id: u32) -> Option<Box<dyn WaylandProtocol<Self> + Send>>;
-    fn on_invalid_object(&mut self, id: u32);
+    fn on_invalid_object(&mut self, id: u32) -> impl std::future::Future<Output = ()> + Send;
 }
 
 pub struct WaylandSocket<State: WaylandState> {
@@ -101,7 +101,7 @@ impl<State: WaylandState> WaylandSocket<State> {
             let p = match client.get_protocol_of_object(msg.object_id) {
                 Some(p) => p,
                 None => {
-                    client.on_invalid_object(msg.object_id);
+                    client.on_invalid_object(msg.object_id).await;
                     continue;
                 }
             };
