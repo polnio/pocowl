@@ -301,7 +301,7 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                             WaylandValue::to_raw(self.object_id)
                         }
                     }
-                    #[async_trait::async_trait(?Send)]
+                    #[async_trait::async_trait]
                     impl<T: #trait_name> WaylandProtocol<T> for #struct_name {
                         async fn call(&self, state: &mut T, message: WaylandMessage, fds: &mut VecDeque<OwnedFd>) {
                             state.call(message, fds).await
@@ -315,8 +315,12 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         fn object_id(&self) -> u32 {
                             self.object_id
                         }
+                        fn copy(&self) -> Box<dyn WaylandProtocol<T> + Send> {
+                            Box::new(*self)
+                        }
                     }
-                    pub trait #trait_name {
+                    #[async_trait::async_trait]
+                    pub trait #trait_name: Send {
                         #(#trait_methods)*
                         async fn call(&mut self, message: WaylandMessage, fds: &mut VecDeque<OwnedFd>) {
                             match message.opcode {

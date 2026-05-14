@@ -8,18 +8,18 @@ use pocowl_wlstream::WaylandStream;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
-use std::rc::Rc;
-use tokio::net::{UnixListener, UnixStream};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use tokio::net::UnixListener;
 
 pub trait WaylandState {
     type ClientState: WaylandClientState;
-    fn get_client_state_mut(&mut self, id: usize) -> Option<&mut Self::ClientState>;
-    fn add_client(&mut self, client: WaylandClient) -> &mut Self::ClientState;
+    fn create_client(&self, client: WaylandClient) -> Self::ClientState;
 }
 
-pub trait WaylandClientState {
+pub trait WaylandClientState: Send {
     fn get_client_mut(&mut self) -> &mut WaylandClient;
-    fn get_protocol_of_object(&self, id: u32) -> Option<Rc<dyn WaylandProtocol<Self>>>;
+    fn get_protocol_of_object(&self, id: u32) -> Option<Box<dyn WaylandProtocol<Self> + Send>>;
     fn on_invalid_object(&mut self, id: u32);
 }
 
@@ -28,7 +28,7 @@ pub struct WaylandSocket<State: WaylandState> {
     listener: UnixListener,
     state: State,
 
-    last_client_id: usize,
+    last_client_id: AtomicUsize,
 }
 impl<State: WaylandState> WaylandSocket<State> {
     fn get_new_socket_path() -> Option<(PathBuf, String)> {
@@ -52,32 +52,44 @@ impl<State: WaylandState> WaylandSocket<State> {
             path,
             state,
 
-            last_client_id: 0,
+            last_client_id: AtomicUsize::new(0),
         };
         Ok((wayland_socket, env))
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&self)
+    where
+        <State as WaylandState>::ClientState: 'static,
+    {
         loop {
             let socket = self.listener.accept().await;
             let (stream, _) = socket.unwrap();
-            let result = self
-                .handle_connection(stream)
-                .await
-                .context("Failed to handle connection");
-            if let Err(e) = result {
-                eprintln!("{e:?}");
-            }
+
+            let id = self.last_client_id.fetch_add(1, Ordering::Relaxed);
+            let stream = stream.into_std().unwrap();
+            let stream = match WaylandStream::new(stream).context("Failed to create wayland stream")
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    eprintln!("{e:?}");
+                    continue;
+                }
+            };
+            let client = WaylandClient::new(id, stream);
+            let client = self.state.create_client(client);
+
+            tokio::spawn(async move {
+                let result = Self::handle_connection(client)
+                    .await
+                    .context("Failed to handle connection");
+                if let Err(e) = result {
+                    eprintln!("{e:?}");
+                }
+            });
         }
     }
 
-    async fn handle_connection(&mut self, stream: UnixStream) -> Result<()> {
-        let id = self.last_client_id;
-        let stream = stream.into_std().unwrap();
-        let stream = WaylandStream::new(stream).context("Failed to create wayland stream")?;
-        let client = WaylandClient::new(id, stream);
-        self.last_client_id += 1;
-        let client = self.state.add_client(client);
+    async fn handle_connection(mut client: State::ClientState) -> Result<()> {
         let mut fds = VecDeque::new();
         loop {
             let Some(msg) = WaylandMessage::read(&mut client.get_client_mut().stream).await? else {
@@ -93,7 +105,7 @@ impl<State: WaylandState> WaylandSocket<State> {
                     continue;
                 }
             };
-            p.call(client, msg, &mut fds).await;
+            p.call(&mut client, msg, &mut fds).await;
         }
         println!("Connection closed");
         Ok(())

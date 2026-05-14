@@ -1,5 +1,6 @@
 use crate::DISPLAY_OBJECT;
 use crate::PocoWlClient;
+use async_trait::async_trait;
 use memmap::MmapMut;
 use pocowl_protocols::WaylandProtocol;
 use pocowl_protocols::wayland::*;
@@ -7,14 +8,13 @@ use pocowl_protocols::xdg_shell::XdgWmBase;
 use pocowl_wlbuffer::WaylandBuffer;
 use std::collections::HashMap;
 use std::os::fd::OwnedFd;
-use std::rc::Rc;
 use tokio::io::AsyncWriteExt as _;
 
-const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Rc<dyn WaylandProtocol<PocoWlClient>>; 4] = [
-    |id| Rc::new(WlCompositor { object_id: id }),
-    |id| Rc::new(WlShm { object_id: id }),
-    |id| Rc::new(XdgWmBase { object_id: id }),
-    |id| Rc::new(WlOutput { object_id: id }),
+const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Box<dyn WaylandProtocol<PocoWlClient> + Send>; 4] = [
+    |id| Box::new(WlCompositor { object_id: id }),
+    |id| Box::new(WlShm { object_id: id }),
+    |id| Box::new(XdgWmBase { object_id: id }),
+    |id| Box::new(WlOutput { object_id: id }),
 ];
 
 pub struct PocoWlState {
@@ -34,6 +34,7 @@ impl PocoWlState {
     }
 }
 
+#[async_trait]
 impl WlDisplayListener for PocoWlClient {
     async fn sync(&mut self, object: WlDisplay, callback: WlCallback) {
         _ = object;
@@ -45,7 +46,7 @@ impl WlDisplayListener for PocoWlClient {
 
     async fn get_registry(&mut self, object: WlDisplay, registry: WlRegistry) {
         _ = object;
-        self.objects.insert(registry.object_id, Rc::new(registry));
+        self.objects.insert(registry.object_id, Box::new(registry));
         let mut data = Vec::new();
         for (name, interface_factory) in SUPPORTED_INTERFACE_FACTORIES.iter().enumerate() {
             let interface = (interface_factory)(registry.object_id);
@@ -63,6 +64,7 @@ impl WlDisplayListener for PocoWlClient {
     }
 }
 
+#[async_trait]
 impl WlRegistryListener for PocoWlClient {
     async fn bind(
         &mut self,
@@ -174,12 +176,14 @@ impl WlRegistryListener for PocoWlClient {
     }
 }
 
+#[async_trait]
 impl WlCallbackListener for PocoWlClient {}
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlCompositorListener for PocoWlClient {
     async fn create_surface(&mut self, object: WlCompositor, id: WlSurface) {
-        self.objects.insert(id.object_id, Rc::new(id));
+        self.objects.insert(id.object_id, Box::new(id));
     }
 
     async fn create_region(&mut self, object: WlCompositor, id: WlRegion) {
@@ -188,6 +192,7 @@ impl WlCompositorListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlShmPoolListener for PocoWlClient {
     async fn create_buffer(
         &mut self,
@@ -208,7 +213,7 @@ impl WlShmPoolListener for PocoWlClient {
             .entry(object)
             .or_default()
             .push(id);
-        self.objects.insert(id.object_id, Rc::new(id));
+        self.objects.insert(id.object_id, Box::new(id));
     }
 
     async fn destroy(&mut self, object: WlShmPool) {
@@ -226,6 +231,7 @@ impl WlShmPoolListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlShmListener for PocoWlClient {
     async fn create_pool(&mut self, object: WlShm, id: WlShmPool, fd: OwnedFd, size: i32) {
         use std::os::fd::{FromRawFd as _, IntoRawFd as _};
@@ -247,7 +253,7 @@ impl WlShmListener for PocoWlClient {
         };
         self.wl_state.shms.insert(id, mmap);
 
-        self.objects.insert(id.object_id, Rc::new(id));
+        self.objects.insert(id.object_id, Box::new(id));
     }
 
     async fn release(&mut self, object: WlShm) {
@@ -256,6 +262,7 @@ impl WlShmListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlBufferListener for PocoWlClient {
     async fn destroy(&mut self, object: WlBuffer) {
         todo!()
@@ -263,6 +270,7 @@ impl WlBufferListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlDataOfferListener for PocoWlClient {
     async fn accept(&mut self, object: WlDataOffer, serial: u32, mime_type: Option<String>) {
         todo!()
@@ -291,6 +299,7 @@ impl WlDataOfferListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlDataSourceListener for PocoWlClient {
     async fn offer(&mut self, object: WlDataSource, mime_type: String) {
         todo!()
@@ -310,6 +319,7 @@ impl WlDataSourceListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlDataDeviceListener for PocoWlClient {
     async fn start_drag(
         &mut self,
@@ -337,6 +347,7 @@ impl WlDataDeviceListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlDataDeviceManagerListener for PocoWlClient {
     async fn create_data_source(&mut self, object: WlDataDeviceManager, id: WlDataSource) {
         todo!()
@@ -353,6 +364,7 @@ impl WlDataDeviceManagerListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlShellListener for PocoWlClient {
     async fn get_shell_surface(&mut self, object: WlShell, id: WlShellSurface, surface: WlSurface) {
         todo!()
@@ -360,6 +372,7 @@ impl WlShellListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlShellSurfaceListener for PocoWlClient {
     async fn pong(&mut self, object: WlShellSurface, serial: u32) {
         todo!()
@@ -431,6 +444,7 @@ impl WlShellSurfaceListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlSurfaceListener for PocoWlClient {
     async fn destroy(&mut self, object: WlSurface) {
         todo!()
@@ -514,6 +528,7 @@ impl WlSurfaceListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlSeatListener for PocoWlClient {
     async fn get_pointer(&mut self, object: WlSeat, id: WlPointer) {
         todo!()
@@ -533,6 +548,7 @@ impl WlSeatListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlPointerListener for PocoWlClient {
     async fn set_cursor(
         &mut self,
@@ -551,6 +567,7 @@ impl WlPointerListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlKeyboardListener for PocoWlClient {
     async fn release(&mut self, object: WlKeyboard) {
         todo!()
@@ -558,6 +575,7 @@ impl WlKeyboardListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlTouchListener for PocoWlClient {
     async fn release(&mut self, object: WlTouch) {
         todo!()
@@ -565,6 +583,7 @@ impl WlTouchListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlOutputListener for PocoWlClient {
     async fn release(&mut self, object: WlOutput) {
         todo!()
@@ -572,6 +591,7 @@ impl WlOutputListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlRegionListener for PocoWlClient {
     async fn destroy(&mut self, object: WlRegion) {
         todo!()
@@ -587,6 +607,7 @@ impl WlRegionListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlSubcompositorListener for PocoWlClient {
     async fn destroy(&mut self, object: WlSubcompositor) {
         todo!()
@@ -604,6 +625,7 @@ impl WlSubcompositorListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlSubsurfaceListener for PocoWlClient {
     async fn destroy(&mut self, object: WlSubsurface) {
         todo!()
@@ -631,6 +653,7 @@ impl WlSubsurfaceListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl WlFixesListener for PocoWlClient {
     async fn destroy(&mut self, object: WlFixes) {
         todo!()

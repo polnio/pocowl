@@ -7,7 +7,7 @@ use pocowl_protocols::wayland::{WlDisplay, WlDisplayError};
 use pocowl_wlclient::WaylandClient;
 use pocowl_wlsocket::{WaylandClientState, WaylandSocket, WaylandState};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt as _;
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
@@ -19,17 +19,17 @@ pub const DISPLAY_OBJECT: WlDisplay = WlDisplay { object_id: 1 };
 
 pub struct PocoWlClient {
     client: WaylandClient,
-    backend_sender: Rc<BackendSender>,
+    backend_sender: Arc<BackendSender>,
 
-    objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>>,
+    objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>>,
 
     wl_state: PocoWlState,
     xdg_shell_state: PocoXdgShellState,
 }
 impl PocoWlClient {
-    fn new(client: WaylandClient, backend_sender: Rc<BackendSender>) -> Self {
-        let mut objects: HashMap<u32, Rc<dyn WaylandProtocol<Self>>> = HashMap::new();
-        objects.insert(1, Rc::new(DISPLAY_OBJECT));
+    fn new(client: WaylandClient, backend_sender: Arc<BackendSender>) -> Self {
+        let mut objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>> = HashMap::new();
+        objects.insert(1, Box::new(DISPLAY_OBJECT));
         Self {
             client,
             backend_sender,
@@ -41,14 +41,12 @@ impl PocoWlClient {
 }
 
 struct PocoWl {
-    clients: HashMap<usize, PocoWlClient>,
-    backend_sender: Rc<BackendSender>,
+    backend_sender: Arc<BackendSender>,
 }
 impl PocoWl {
     fn new(backend_sender: BackendSender) -> Self {
         Self {
-            clients: HashMap::new(),
-            backend_sender: Rc::new(backend_sender),
+            backend_sender: Arc::new(backend_sender),
         }
     }
 }
@@ -56,14 +54,8 @@ impl PocoWl {
 impl WaylandState for PocoWl {
     type ClientState = PocoWlClient;
 
-    fn get_client_state_mut(&mut self, id: usize) -> Option<&mut Self::ClientState> {
-        self.clients.get_mut(&id)
-    }
-
-    fn add_client(&mut self, client: WaylandClient) -> &mut Self::ClientState {
-        self.clients
-            .entry(client.id)
-            .or_insert(PocoWlClient::new(client, self.backend_sender.clone()))
+    fn create_client(&self, client: WaylandClient) -> Self::ClientState {
+        PocoWlClient::new(client, self.backend_sender.clone())
     }
 }
 
@@ -71,8 +63,8 @@ impl WaylandClientState for PocoWlClient {
     fn get_client_mut(&mut self) -> &mut WaylandClient {
         &mut self.client
     }
-    fn get_protocol_of_object(&self, id: u32) -> Option<Rc<dyn WaylandProtocol<Self>>> {
-        self.objects.get(&id).cloned()
+    fn get_protocol_of_object(&self, id: u32) -> Option<Box<dyn WaylandProtocol<Self> + Send>> {
+        self.objects.get(&id).map(|p| p.copy())
     }
     fn on_invalid_object(&mut self, id: u32) {
         tokio::task::block_in_place(move || {
@@ -111,7 +103,7 @@ async fn main() -> Result<()> {
     let mut backend = pocowl_backend_glfw::GlfwBackend {};
     let backend_sender = pocowl_backend::BackendSender::new(backend_tx);
     let state = PocoWl::new(backend_sender);
-    let (mut socket, wenv) = WaylandSocket::create(state)?;
+    let (socket, wenv) = WaylandSocket::create(state)?;
     println!("Listening on {}", wenv);
 
     let backend_task = tokio::task::spawn_blocking(move || {

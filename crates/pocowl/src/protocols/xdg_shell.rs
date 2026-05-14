@@ -1,8 +1,8 @@
 use crate::PocoWlClient;
+use async_trait::async_trait;
 use pocowl_protocols::wayland::*;
 use pocowl_protocols::xdg_shell::*;
 use std::collections::HashMap;
-use std::rc::Rc;
 use tokio::io::AsyncWriteExt as _;
 
 pub struct PocoXdgShellState {
@@ -21,6 +21,7 @@ impl PocoXdgShellState {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl XdgWmBaseListener for PocoWlClient {
     async fn destroy(&mut self, object: XdgWmBase) {
         todo!();
@@ -40,7 +41,7 @@ impl XdgWmBaseListener for PocoWlClient {
             .surface_map
             .insert(xdg_surface, surface);
         self.objects
-            .insert(xdg_surface.object_id, Rc::new(xdg_surface));
+            .insert(xdg_surface.object_id, Box::new(xdg_surface));
         let _ = self
             .client
             .stream
@@ -59,6 +60,7 @@ impl XdgWmBaseListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl XdgPositionerListener for PocoWlClient {
     async fn destroy(&mut self, object: XdgPositioner) {
         todo!()
@@ -118,6 +120,7 @@ impl XdgPositionerListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl XdgSurfaceListener for PocoWlClient {
     async fn destroy(&mut self, object: XdgSurface) {
         todo!()
@@ -125,7 +128,7 @@ impl XdgSurfaceListener for PocoWlClient {
 
     async fn get_toplevel(&mut self, object: XdgSurface, id: XdgToplevel) {
         self.xdg_shell_state.toplevel_map.insert(id, object);
-        self.objects.insert(id.object_id, Rc::new(id));
+        self.objects.insert(id.object_id, Box::new(id));
     }
 
     async fn get_popup(
@@ -155,6 +158,7 @@ impl XdgSurfaceListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl XdgToplevelListener for PocoWlClient {
     async fn destroy(&mut self, object: XdgToplevel) {
         todo!()
@@ -227,6 +231,7 @@ impl XdgToplevelListener for PocoWlClient {
 }
 
 #[allow(unused_variables)]
+#[async_trait]
 impl XdgPopupListener for PocoWlClient {
     async fn destroy(&mut self, object: XdgPopup) {
         todo!()
