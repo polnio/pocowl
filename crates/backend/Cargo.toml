@@ -1,9 +1,0 @@
-[package]
-name = "pocowl-backend"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-
-[dependencies]
-crossbeam = "0.8.4"
-pocowl-wlbuffer.workspace = true

@@ -1,9 +1,0 @@
-[package]
-name = "pocowl-protocols-base"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-
-[dependencies]
-pocowl-wlmessage.workspace = true
-async-trait = "0.1.89"
