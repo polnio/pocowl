@@ -18,6 +18,9 @@ async fn main() -> Result<()> {
 
     let (backend_tx, backend_rx) = crossbeam::channel::unbounded();
     let backend_sender = backends::BackendSender::new(backend_tx);
+    #[cfg(feature = "backend-dummy")]
+    let mut backend = backends::dummy::DummyBackend::new();
+    #[cfg(feature = "backend-glfw")]
     let mut backend = backends::glfw::GlfwBackend::new();
 
     let (server, wenv) = Server::create(backend_sender)?;

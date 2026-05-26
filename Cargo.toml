@@ -33,3 +33,4 @@ softbuffer = { version = "0.4.8", optional = true }
 
 [features]
 backend-glfw = ["dep:glfw", "dep:ouroboros", "dep:softbuffer"]
+backend-dummy = []

@@ -1,3 +1,5 @@
+#[cfg(feature = "backend-dummy")]
+pub mod dummy;
 #[cfg(feature = "backend-glfw")]
 pub mod glfw;
 
