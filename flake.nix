@@ -24,6 +24,7 @@
               rustc
               # GLFW
               cmake
+              glfw
               pkg-config
               wayland
               libxkbcommon
