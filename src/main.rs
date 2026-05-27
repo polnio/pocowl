@@ -8,13 +8,17 @@ use crate::args::Args;
 use crate::backends::Backend;
 use crate::socket::Server;
 use anyhow::Result;
-use backends::Backend as _;
 use clap::Parser as _;
 use tracing::info;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 
-fn auto_backend(backend: crate::args::Backend) -> Option<crate::args::Backend> {
+#[cfg(not(any(feature = "backend-dummy", feature = "backend-glfw")))]
+compile_error!(
+    "No backend selected. Select one with the `backend-dummy` or `backend-glfw` feature"
+);
+
+fn auto_backend() -> Option<crate::args::Backend> {
     #[cfg(feature = "backend-glfw")]
     if std::env::vars().any(|(k, _)| k == "WAYLAND_DISPLAY" || k == "DISPLAY") {
         return Some(crate::args::Backend::Glfw);
@@ -28,6 +32,10 @@ fn auto_backend(backend: crate::args::Backend) -> Option<crate::args::Backend> {
 }
 
 #[tokio::main]
+#[cfg_attr(
+    not(any(feature = "backend-dummy", feature = "backend-glfw")),
+    allow(unused)
+)]
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
@@ -36,7 +44,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let backend = match args.backend {
-        args::Backend::Auto => match auto_backend(args.backend) {
+        args::Backend::Auto => match auto_backend() {
             Some(b) => b,
             None => {
                 tracing::error!("No backend available");

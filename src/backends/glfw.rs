@@ -46,7 +46,7 @@ impl GlfwBackend {
 
         let (stop_tx, stop_rx) = crossbeam::channel::bounded(1);
 
-        let task = std::thread::spawn({
+        std::thread::spawn({
             let window = window.clone();
             move || {
                 loop {
