@@ -9,10 +9,10 @@ use std::os::fd::OwnedFd;
 use tokio::io::AsyncWriteExt as _;
 use tracing::{error, warn};
 
-const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Box<dyn WaylandProtocol<Client> + Send>; 3] = [
+const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Box<dyn WaylandProtocol<Client> + Send>; 4] = [
     |id| Box::new(WlCompositor { object_id: id }),
     |id| Box::new(WlShm { object_id: id }),
-    // |id| Box::new(WlOutput { object_id: id }),
+    |id| Box::new(WlOutput { object_id: id }),
     |id| Box::new(XdgWmBase { object_id: id }),
 ];
 
@@ -134,28 +134,28 @@ impl WlRegistryListener for Client {
                     )
                     .await;
             }
-            // WlOutput::NAME => {
-            //     let (x, y, w, h) = self.backend_sender.get_box();
-            //     // FIXME: Make difference between physical and logical size
-            //     let mut data = Vec::new();
-            //     let wl_output = WlOutput { object_id: id };
-            //     data.extend(
-            //         wl_output
-            //             .geometry(
-            //                 x as i32,
-            //                 y as i32,
-            //                 w as i32,
-            //                 h as i32,
-            //                 WlOutputSubpixel::Unknown,
-            //                 "Not your buisness".to_owned(),
-            //                 "Not your buisness".to_owned(),
-            //                 WlOutputTransform::Normal,
-            //             )
-            //             .to_raw(),
-            //     );
-            //     data.extend(wl_output.done().to_raw());
-            //     let _ = self.client.stream.write(&data).await;
-            // }
+            WlOutput::NAME => {
+                let (x, y, w, h) = self.shared_state.get_box();
+                // FIXME: Make difference between physical and logical size
+                let mut data = Vec::new();
+                let wl_output = WlOutput { object_id: id };
+                data.extend(
+                    wl_output
+                        .geometry(
+                            x as i32,
+                            y as i32,
+                            w as i32,
+                            h as i32,
+                            WlOutputSubpixel::Unknown,
+                            "Not your buisness".to_owned(),
+                            "Not your buisness".to_owned(),
+                            WlOutputTransform::Normal,
+                        )
+                        .to_raw(),
+                );
+                data.extend(wl_output.done().to_raw());
+                let _ = self.stream.write(&data).await;
+            }
             _ => {}
         }
 
@@ -357,10 +357,10 @@ impl WlSurfaceListener for Client {
     }
 }
 
-// #[allow(unused_variables)]
-// #[async_trait]
-// impl WlOutputListener for PocoWlClient {
-//     async fn release(&mut self, output: WlOutput) {
-//         todo!()
-//     }
-// }
+#[allow(unused_variables)]
+#[async_trait]
+impl WlOutputListener for Client {
+    async fn release(&mut self, output: WlOutput) {
+        todo!()
+    }
+}

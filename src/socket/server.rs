@@ -50,7 +50,7 @@ impl Server {
         let listener = UnixListener::bind(&path).context("Failed to bind socket")?;
 
         let (server_sender, client_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let shared_state = Arc::new(SharedState::new(server_sender));
+        let shared_state = Arc::new(SharedState::new(backend_sender.clone(), server_sender));
 
         let wayland_socket = Self {
             listener,

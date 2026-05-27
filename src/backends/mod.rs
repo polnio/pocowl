@@ -10,6 +10,7 @@ pub trait Backend {
     fn run(&mut self, rx: Receiver<Message>);
 }
 
+#[derive(Clone)]
 pub struct BackendSender {
     tx: Sender<Message>,
 }

@@ -1,17 +1,19 @@
+use crate::backends::BackendSender;
+use crate::utils::WaylandBuffer;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
-
-use crate::utils::WaylandBuffer;
 
 pub struct SharedState {
     is_recalculate_needed: AtomicBool,
     server_sender: tokio::sync::mpsc::UnboundedSender<Event>,
+    backend_sender: BackendSender,
 }
 impl SharedState {
-    pub fn new(server_sender: mpsc::UnboundedSender<Event>) -> Self {
+    pub fn new(backend_sender: BackendSender, server_sender: mpsc::UnboundedSender<Event>) -> Self {
         Self {
             is_recalculate_needed: AtomicBool::new(false),
             server_sender,
+            backend_sender,
         }
     }
     pub fn render(&self, buffer: WaylandBuffer) {
@@ -26,6 +28,9 @@ impl SharedState {
     }
     pub fn unset_recalculate_needed(&self) {
         self.is_recalculate_needed.store(false, Ordering::Relaxed);
+    }
+    pub fn get_box(&self) -> (u32, u32, u32, u32) {
+        self.backend_sender.get_box()
     }
 }
 
