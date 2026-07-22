@@ -22,7 +22,9 @@ struct ImpWlSurface {
 }
 struct ImpWlBuffer {
     inner: WlBuffer,
-    buf: WaylandBuffer,
+    // buf: WaylandBuffer,
+    width: usize,
+    height: usize,
 }
 struct ImpWlShmPool {
     inner: WlShmPool,
@@ -203,9 +205,18 @@ impl WlShmPoolListener for Client {
             );
             return;
         };
+        if stride != width * 4 {
+            error!(
+                "wl_shm_pool#{}::create_buffer: stride and width don't match: {} != {}",
+                pool.inner.object_id, stride, width
+            );
+            return;
+        }
         let buffer = ImpWlBuffer {
             inner: buffer,
-            buf: WaylandBuffer::new(width as usize, height as usize, stride as usize),
+            // buf: WaylandBuffer::new(width as usize, height as usize, stride as usize),
+            width: width as usize,
+            height: height as usize,
         };
         pool.buffers.push(buffer.inner);
         self.add_object(buffer.inner);
@@ -323,20 +334,30 @@ impl WlSurfaceListener for Client {
         };
         let pool = self.wl_state().shm_pools.get(&pool.inner).unwrap();
         // TODO: Do I need to copy the data?
-        let data = pool.mmap.to_vec();
+        let data = pool
+            .mmap
+            .chunks_exact(4)
+            .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+            .collect::<Vec<_>>();
 
         let buffer = self.wl_state_mut().buffers.get_mut(&buffer).unwrap();
-        if buffer.buf.data.len() != data.len() {
+        // if buffer.buf.data.len() != data.len() {
+        let elen = buffer.width * buffer.height;
+        if elen != data.len() {
             error!(
                 "wl_surface#{object_id}::commit: buffer size {} != shmem size {}",
-                buffer.buf.data.len(),
+                elen,
                 data.len()
             );
             return;
         }
-        buffer.buf.data = data;
+        // buffer.buf.data = data;
         // TODO: Do I need to copy the buffer?
-        let buf = buffer.buf.clone();
+        // let buf = buffer.buf.clone();
+        let buf = WaylandBuffer {
+            data,
+            stride: buffer.width,
+        };
         self.shared_state.render(buf);
     }
 

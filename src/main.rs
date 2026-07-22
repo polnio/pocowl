@@ -41,6 +41,8 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    //////////////////////////////////////////////////////////////////////////////
+
     let args = Args::parse();
 
     let backend = match args.backend {
@@ -71,8 +73,12 @@ async fn main() -> Result<()> {
     let (backend_tx, backend_rx) = crossbeam::channel::unbounded();
     let backend_sender = backends::BackendSender::new(backend_tx);
 
+    //////////////////////////////////////////////////////////////////////////////
+
     let (server, wenv) = Server::create(backend_sender)?;
     info!("Listening on {}", wenv);
+
+    //////////////////////////////////////////////////////////////////////////////
 
     let backend_task = tokio::task::spawn_blocking(move || {
         info!("Starting backend");

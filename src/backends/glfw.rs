@@ -97,26 +97,12 @@ impl GlfwBackend {
     }
     fn handle_message(message: Message, window: &mut GlfwBackendWindow) -> bool {
         match message {
-            Message::Draw { x, y, buffer } => window.with_surface_mut(|surface| {
-                let x = x as usize;
-                let y = y as usize;
-                let mut wbuffer = surface.buffer_mut().unwrap();
-                let ww = wbuffer.width().get() as usize;
-                let wh = wbuffer.height().get() as usize;
-                let bw = buffer.width();
-                let bh = buffer.height();
-                let mw = usize::min(ww, bw);
-                let mh = usize::min(wh, bh);
-                for j in x..x + mh {
-                    for i in y..y + mw {
-                        let bindex = j * bw + i;
-                        let windex = j * ww + i;
-                        // Color is in ARGB format
-                        let color: [u8; 4] = (&buffer.data[bindex * 4..][..4]).try_into().unwrap();
-                        wbuffer[windex] = u32::from_ne_bytes(color);
-                    }
-                }
-                wbuffer.present().unwrap();
+            Message::WithBuffer { f } => window.with_surface_mut(|surface| {
+                let mut buffer = surface.buffer_mut().unwrap();
+                let w = buffer.width().get() as usize;
+                let h = buffer.height().get() as usize;
+                f(&mut *buffer, w, h);
+                buffer.present().unwrap();
             }),
             Message::GetBox { resp } => {
                 let (w, h) = window.borrow_window().get_size();

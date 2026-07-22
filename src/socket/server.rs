@@ -71,7 +71,17 @@ impl Server {
             while let Some(event) = tthis.client_receiver.lock().await.recv().await {
                 match event {
                     Event::Render(buffer) => {
-                        tthis.backend_sender.draw(0, 0, buffer);
+                        tthis.backend_sender.with_buffer(move |wbuffer, w, h| {
+                            for (i, c) in buffer.data.iter().enumerate() {
+                                let x = i % buffer.stride;
+                                let y = i / buffer.stride;
+                                if x > w || y > h {
+                                    continue;
+                                }
+                                let j = y * w + x;
+                                wbuffer[j] = *c;
+                            }
+                        });
                     }
                     Event::Recalculate => {
                         if tthis.shared_state.is_recalculate_needed() {

@@ -11,7 +11,7 @@ impl Backend for DummyBackend {
     fn run(&mut self, rx: Receiver<super::Message>) {
         while let Ok(message) = rx.recv() {
             match message {
-                super::Message::Draw { .. } => {}
+                super::Message::WithBuffer { .. } => {}
                 super::Message::GetBox { resp } => {
                     let _ = resp.send((0, 0, 100, 100));
                 }

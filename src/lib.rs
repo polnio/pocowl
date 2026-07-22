@@ -1,5 +1,3 @@
-mod args;
-
 use convert_case::ccase;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;

@@ -3,7 +3,6 @@ pub mod dummy;
 #[cfg(feature = "backend-glfw")]
 pub mod glfw;
 
-use crate::utils::WaylandBuffer;
 use crossbeam::channel::{Receiver, Sender};
 
 pub trait Backend {
@@ -18,8 +17,8 @@ impl BackendSender {
     pub fn new(tx: Sender<Message>) -> Self {
         Self { tx }
     }
-    pub fn draw(&self, x: u32, y: u32, buffer: WaylandBuffer) {
-        let _ = self.tx.send(Message::Draw { x, y, buffer });
+    pub fn with_buffer(&self, f: impl FnOnce(&mut [u32], usize, usize) + Send + 'static) {
+        let _ = self.tx.send(Message::WithBuffer { f: Box::new(f) });
     }
     pub fn get_box(&self) -> (u32, u32, u32, u32) {
         let (tx, rx) = crossbeam::channel::bounded(1);
@@ -28,12 +27,10 @@ impl BackendSender {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub enum Message {
-    Draw {
-        x: u32,
-        y: u32,
-        buffer: WaylandBuffer,
+    WithBuffer {
+        f: Box<dyn FnOnce(&mut [u32], usize, usize) + Send>,
     },
     GetBox {
         resp: Responder<(u32, u32, u32, u32)>,
