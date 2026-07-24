@@ -1,9 +1,17 @@
+mod app;
 mod args;
 mod backends;
 mod protocols;
 mod socket;
 mod utils;
 
+pub use app::AppHandle;
+
+slotmap::new_key_type! {
+    pub struct ClientId;
+}
+
+use crate::app::App;
 use crate::args::Args;
 use crate::backends::Backend;
 use crate::socket::Server;
@@ -75,7 +83,8 @@ async fn main() -> Result<()> {
 
     //////////////////////////////////////////////////////////////////////////////
 
-    let (server, wenv) = Server::create(backend_sender)?;
+    let mut app = App::new(backend_sender);
+    let (io_server, wenv) = Server::create(app.handle())?;
     info!("Listening on {}", wenv);
 
     //////////////////////////////////////////////////////////////////////////////
@@ -85,12 +94,16 @@ async fn main() -> Result<()> {
         backend.run(backend_rx);
         info!("Backend stopped");
     });
-
-    let server_task = server.run();
-
+    let io_task = io_server.run();
     let cancel_task = tokio::signal::ctrl_c();
+    let app_task = app.run();
 
-    tokio::select! { _ = backend_task => (), _ = server_task => (), _ = cancel_task => () }
+    tokio::select! {
+        _ = backend_task => (),
+        _ = io_task => (),
+        _ = app_task => (),
+        _ = cancel_task => ()
+    }
 
     Ok(())
 }

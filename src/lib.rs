@@ -336,7 +336,6 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                 pub mod #name {
                     use super::*;
                     use crate::protocols::WaylandProtocol;
-                    use crate::socket::Client as WaylandClient;
                     use crate::socket::WaylandMessage;
                     use crate::utils::WaylandValue;
                     use fixed::types::I24F8;

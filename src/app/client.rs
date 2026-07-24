@@ -1,39 +1,28 @@
-use tokio::io::AsyncWriteExt as _;
-
-use super::WaylandStream;
-use crate::protocols::{DISPLAY_OBJECT, WaylandProtocol, imp::ImpProtoStates};
-use crate::socket::shared::SharedState;
+use crate::AppHandle;
+use crate::protocols::imp::ImpProtoStates;
+use crate::protocols::{DISPLAY_OBJECT, WaylandProtocol};
+use crate::socket::WaylandMessage;
 use std::collections::HashMap;
-use std::sync::Arc;
+use tokio::sync::mpsc;
 
 pub struct Client {
-    pub id: usize,
-    pub stream: WaylandStream,
-    objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>>,
+    pub app_handle: AppHandle,
     pub imp_proto_states: ImpProtoStates,
-
-    pub shared_state: Arc<SharedState>,
+    sender: mpsc::UnboundedSender<WaylandMessage>,
+    objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>>,
 }
 impl Client {
-    pub fn new(id: usize, stream: WaylandStream, shared_state: Arc<SharedState>) -> Self {
+    pub fn new(app_handle: AppHandle, sender: mpsc::UnboundedSender<WaylandMessage>) -> Self {
         let objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>> = HashMap::new();
         let imp_proto_states = ImpProtoStates::default();
         let mut this = Self {
-            id,
-            stream,
-            objects,
+            app_handle,
             imp_proto_states,
-            shared_state,
+            sender,
+            objects,
         };
         this.add_object(DISPLAY_OBJECT);
         this
-    }
-
-    pub async fn error(&mut self, id: u32, code: u32, message: String) {
-        let _ = self
-            .stream
-            .write(&DISPLAY_OBJECT.error(id, code, message).to_raw())
-            .await;
     }
 
     pub fn add_object(&mut self, object: impl WaylandProtocol<Self> + Send + 'static) {
@@ -47,5 +36,13 @@ impl Client {
     }
     pub fn remove_object(&mut self, id: u32) {
         self.objects.remove(&id);
+    }
+
+    pub fn send(&self, resp: WaylandMessage) {
+        self.sender.send(resp).unwrap();
+    }
+
+    pub fn error(&self, id: u32, code: u32, message: String) {
+        self.send(DISPLAY_OBJECT.error(id, code, message));
     }
 }

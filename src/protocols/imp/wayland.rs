@@ -1,12 +1,11 @@
+use crate::app::Client;
 use crate::protocols::xdg_shell::XdgWmBase;
 use crate::protocols::{DISPLAY_OBJECT, WaylandProtocol, wayland::*};
-use crate::socket::Client;
 use crate::utils::WaylandBuffer;
 use async_trait::async_trait;
 use memmap::MmapMut;
 use std::collections::HashMap;
 use std::os::fd::OwnedFd;
-use tokio::io::AsyncWriteExt as _;
 use tracing::{error, warn};
 
 const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Box<dyn WaylandProtocol<Client> + Send>; 4] = [
@@ -51,30 +50,21 @@ impl Client {
 impl WlDisplayListener for Client {
     async fn sync(&mut self, object: WlDisplay, callback: WlCallback) {
         _ = object;
-        let mut data = Vec::new();
-        // data.extend(WlDisplay::delete_id(object, callback.object_id).to_raw());
-        data.extend(callback.done(Default::default()).to_raw());
-        let _ = self.stream.write(&data).await;
+        // self.send(WlDisplay::delete_id(object, callback.object_id));
+        self.send(callback.done(Default::default()));
     }
 
     async fn get_registry(&mut self, object: WlDisplay, registry: WlRegistry) {
         _ = object;
-        // self.objects.insert(registry.object_id, Box::new(registry));
         self.add_object(registry);
-        let mut data = Vec::new();
         for (name, interface_factory) in SUPPORTED_INTERFACE_FACTORIES.iter().enumerate() {
             let interface = (interface_factory)(registry.object_id);
-            data.extend(
-                registry
-                    .global(
-                        name as u32,
-                        interface.name().to_owned(),
-                        interface.version(),
-                    )
-                    .to_raw(),
-            );
+            self.send(registry.global(
+                name as u32,
+                interface.name().to_owned(),
+                interface.version(),
+            ));
         }
-        let _ = self.stream.write(&data).await;
     }
 }
 
@@ -93,8 +83,7 @@ impl WlRegistryListener for Client {
                 object.object_id,
                 WlDisplayError::InvalidObject as u32,
                 format!("Invalid interface name: {}", name),
-            )
-            .await;
+            );
             return;
         };
         let interface = (interface_factory)(id);
@@ -107,8 +96,7 @@ impl WlRegistryListener for Client {
                     interface.name(),
                     id_interface
                 ),
-            )
-            .await;
+            );
             return;
         }
         if id_version > interface.version() {
@@ -120,43 +108,29 @@ impl WlRegistryListener for Client {
                     interface.version(),
                     id_version
                 ),
-            )
-            .await;
+            );
             return;
         }
 
         match id_interface.as_str() {
             WlShm::NAME => {
-                let _ = self
-                    .stream
-                    .write(
-                        &WlShm { object_id: id }
-                            .format(WlShmFormat::Argb8888)
-                            .to_raw(),
-                    )
-                    .await;
+                self.send(WlShm { object_id: id }.format(WlShmFormat::Argb8888));
             }
             WlOutput::NAME => {
-                let geometry = self.shared_state.get_box();
+                let geometry = self.app_handle.backend().get_box();
                 // FIXME: Make difference between physical and logical size
-                let mut data = Vec::new();
                 let wl_output = WlOutput { object_id: id };
-                data.extend(
-                    wl_output
-                        .geometry(
-                            geometry.x as i32,
-                            geometry.y as i32,
-                            geometry.w as i32,
-                            geometry.h as i32,
-                            WlOutputSubpixel::Unknown,
-                            "Not your buisness".to_owned(),
-                            "Not your buisness".to_owned(),
-                            WlOutputTransform::Normal,
-                        )
-                        .to_raw(),
-                );
-                data.extend(wl_output.done().to_raw());
-                let _ = self.stream.write(&data).await;
+                self.send(wl_output.geometry(
+                    geometry.x as i32,
+                    geometry.y as i32,
+                    geometry.w as i32,
+                    geometry.h as i32,
+                    WlOutputSubpixel::Unknown,
+                    "Not your buisness".to_owned(),
+                    "Not your buisness".to_owned(),
+                    WlOutputTransform::Normal,
+                ));
+                self.send(wl_output.done());
             }
             _ => {}
         }
@@ -225,10 +199,7 @@ impl WlShmPoolListener for Client {
 
     async fn destroy(&mut self, pool: WlShmPool) {
         self.remove_object(pool.object_id);
-        let _ = self
-            .stream
-            .write(&DISPLAY_OBJECT.delete_id(pool.object_id).to_raw())
-            .await;
+        self.send(DISPLAY_OBJECT.delete_id(pool.object_id));
     }
 
     async fn resize(&mut self, pool: WlShmPool, size: i32) {
@@ -249,8 +220,7 @@ impl WlShmListener for Client {
                     pool.object_id,
                     WlShmError::InvalidFd as u32,
                     err.to_string(),
-                )
-                .await;
+                );
                 return;
             }
         };
@@ -358,7 +328,7 @@ impl WlSurfaceListener for Client {
             data,
             stride: buffer.width,
         };
-        self.shared_state.render(buf);
+        self.app_handle.render(buf);
     }
 
     async fn set_buffer_transform(&mut self, surface: WlSurface, transform: WlOutputTransform) {

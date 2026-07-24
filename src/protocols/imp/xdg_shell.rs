@@ -1,9 +1,8 @@
+use crate::app::Client;
 use crate::protocols::wayland::{WlOutput, WlSeat, WlSurface};
 use crate::protocols::xdg_shell::*;
-use crate::socket::Client;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use tokio::io::AsyncWriteExt as _;
 
 struct ImpXdgSurface {
     inner: XdgSurface,
@@ -50,15 +49,11 @@ impl XdgWmBaseListener for Client {
             wl_surface,
         };
         self.add_object(xdg_surface.inner);
-        let _ = self
-            .stream
-            .write(
-                &xdg_surface
-                    .inner
-                    .configure(self.xdg_shell_state().next_serial)
-                    .to_raw(),
-            )
-            .await;
+        self.send(
+            xdg_surface
+                .inner
+                .configure(self.xdg_shell_state().next_serial),
+        );
         self.xdg_shell_state_mut()
             .surfaces
             .insert(xdg_surface.inner, xdg_surface);

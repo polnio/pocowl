@@ -1,6 +1,5 @@
-use super::WaylandStream;
 use anyhow::Result;
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 
 #[derive(Debug)]
 pub struct WaylandMessage {
@@ -24,7 +23,7 @@ impl WaylandMessage {
         vec.extend(self.data.clone());
         vec
     }
-    pub async fn read(stream: &mut WaylandStream) -> Result<Option<Self>> {
+    pub async fn read(mut stream: impl AsyncRead + Unpin) -> Result<Option<Self>> {
         let object_id = match stream.read_u32_le().await {
             Ok(id) => id,
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),

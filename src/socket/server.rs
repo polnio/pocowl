@@ -1,36 +1,22 @@
-use super::Client;
-use super::WaylandStream;
-use super::shared::Event;
-use crate::backends::BackendSender;
-use crate::protocols::wayland::WlDisplayError;
-use crate::socket::WaylandMessage;
-use crate::socket::shared::SharedState;
+use crate::socket::{WaylandMessage, WaylandStream};
+use crate::{AppHandle, ClientId};
 use anyhow::{Context as _, Result};
-use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::io::AsyncWriteExt;
 use tokio::net::UnixListener;
-use tokio::sync::Mutex;
-use tracing::debug;
-use tracing::error;
+use tracing::{debug, error};
+
+#[derive(Clone)]
+struct ServerState {
+    app_handle: AppHandle,
+}
 
 pub struct Server {
     path: PathBuf,
     listener: UnixListener,
-
-    // TODO: use a proper id
-    clients: Mutex<HashMap<usize, Client>>,
-    last_client_id: AtomicUsize,
-
-    backend_sender: BackendSender,
-
-    // The mutex is needed to satisfy the borrow checker, but it will be used in only one place, so
-    // no blocking will occur.
-    client_receiver: Mutex<tokio::sync::mpsc::UnboundedReceiver<Event>>,
-    shared_state: Arc<SharedState>,
+    state: ServerState,
 }
+
 impl Server {
     fn get_new_socket_path() -> Option<(PathBuf, String)> {
         let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")?;
@@ -45,72 +31,27 @@ impl Server {
         None
     }
 
-    pub fn create(backend_sender: BackendSender) -> Result<(Self, String)> {
+    pub fn create(app_handle: AppHandle) -> Result<(Self, String)> {
         let (path, env) = Self::get_new_socket_path().context("No socket found")?;
         let listener = UnixListener::bind(&path).context("Failed to bind socket")?;
-
-        let (server_sender, client_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let shared_state = Arc::new(SharedState::new(backend_sender.clone(), server_sender));
-
-        let wayland_socket = Self {
+        let state = ServerState { app_handle };
+        let server = Self {
             listener,
             path,
-            backend_sender,
-            last_client_id: AtomicUsize::new(0),
-            shared_state,
-            clients: Default::default(),
-            client_receiver: client_receiver.into(),
+            state,
         };
-        Ok((wayland_socket, env))
+        Ok((server, env))
     }
 
     pub async fn run(self) -> Result<()> {
-        let this = Arc::new(self);
-        let tthis = Arc::clone(&this);
-        tokio::spawn(async move {
-            while let Some(event) = tthis.client_receiver.lock().await.recv().await {
-                match event {
-                    Event::Render(buffer) => {
-                        tthis.backend_sender.with_buffer(move |wbuffer, w, h| {
-                            for (i, c) in buffer.data.iter().enumerate() {
-                                let w = w as usize;
-                                let h = h as usize;
-                                let x = i % buffer.stride;
-                                let y = i / buffer.stride;
-                                if x > w || y > h {
-                                    continue;
-                                }
-                                let j = y * w + x;
-                                wbuffer[j] = *c;
-                            }
-                        });
-                    }
-                    Event::Recalculate => {
-                        if tthis.shared_state.is_recalculate_needed() {
-                            tthis.shared_state.unset_recalculate_needed();
-                            // FIXME: Make proper recalculation (eg: layout), and send configure
-                            // requests to clients
-                        }
-                    }
-                }
-            }
-        });
-        // this.run_socket().await
-        Self::run_socket(this).await
-    }
-
-    async fn run_socket(this: Arc<Self>) -> Result<()> {
         loop {
-            let (stream, _) = this.listener.accept().await?;
-            let id = this.last_client_id.fetch_add(1, Ordering::Relaxed);
+            let (stream, _) = self.listener.accept().await?;
             let stream = stream.into_std()?;
             let stream = WaylandStream::new(stream)?;
-            let client = Client::new(id, stream, this.shared_state.clone());
-            let this = Arc::clone(&this);
+
+            let state = self.state.clone();
             tokio::spawn(async move {
-                let mut clients = this.clients.lock().await;
-                let client = clients.entry(id).or_insert(client);
-                let result = Self::handle_connection(client)
+                let result = Self::handle_connection(stream, state)
                     .await
                     .context("Failed to handle connection");
                 if let Err(e) = result {
@@ -120,32 +61,49 @@ impl Server {
         }
     }
 
-    async fn handle_connection(client: &mut Client) -> Result<()> {
-        let mut fds = VecDeque::new();
+    async fn handle_connection(mut stream: WaylandStream, mut state: ServerState) -> Result<()> {
+        let (id, mut rx) = state.app_handle.connection().await;
         loop {
-            let Some(msg) = WaylandMessage::read(&mut client.stream).await? else {
-                break;
-            };
-            debug!("Got message: {msg:?}");
-            let sub_fds = client.stream.fds_mut();
-            fds.extend(sub_fds.drain(..));
-            let p = match client.get_object(msg.object_id) {
-                Some(p) => p,
-                None => {
-                    client
-                        .error(
-                            msg.object_id,
-                            WlDisplayError::InvalidObject as u32,
-                            format!("Invalid object id: {}", msg.object_id),
-                        )
-                        .await;
-                    continue;
+            tokio::select! {
+                resp = rx.recv() => {
+                    let Some(resp) = resp else {
+                        break;
+                    };
+                    Self::handle_response(&mut stream, resp).await;
                 }
-            };
-            p.call(client, msg, &mut fds).await;
+                msg = WaylandMessage::read(&mut stream) => {
+                    let Some(msg) = msg? else {
+                        break;
+                    };
+                    Self::handle_msg(&mut stream, &mut state, id, msg).await;
+                }
+            }
         }
         debug!("Connection closed");
         Ok(())
+    }
+    async fn handle_response(stream: &mut WaylandStream, resp: WaylandMessage) {
+        let result = stream
+            .write_all(&resp.to_raw())
+            .await
+            .context("Failed to send response");
+        if let Err(e) = result {
+            error!("{e:?}");
+        };
+    }
+    async fn handle_msg(
+        stream: &mut WaylandStream,
+        state: &mut ServerState,
+        id: ClientId,
+        msg: WaylandMessage,
+    ) {
+        debug!("Got message: {msg:?}");
+        stream
+            .fds_mut()
+            .drain(..)
+            .for_each(|fd| state.app_handle.fd_attached(id, fd));
+
+        state.app_handle.message(id, msg);
     }
 }
 
