@@ -1,4 +1,4 @@
-use anchovy::AnchovyStream;
+use anchovy::{AnchovyStream, WAYLAND_SCM_RIGHTS};
 use std::collections::VecDeque;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 pub struct WaylandStream {
-    inner: AnchovyStream,
+    inner: AnchovyStream<WAYLAND_SCM_RIGHTS>,
 }
 impl WaylandStream {
     pub fn new(stream: impl Into<UnixStream>) -> std::io::Result<Self> {
@@ -15,8 +15,7 @@ impl WaylandStream {
         Ok(Self { inner })
     }
     pub fn fds_mut(&mut self) -> &mut VecDeque<OwnedFd> {
-        // std::mem::replace(&mut self.inner.decode_fds, VecDeque::new())
-        &mut self.inner.decode_fds
+        self.inner.read_queue_mut()
     }
 }
 
