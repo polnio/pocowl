@@ -1,4 +1,5 @@
 use super::{Backend, Message};
+use crate::utils::Geometry;
 use crossbeam::channel::Receiver;
 use glfw::Context as _;
 use ouroboros::self_referencing;
@@ -99,14 +100,19 @@ impl GlfwBackend {
         match message {
             Message::WithBuffer { f } => window.with_surface_mut(|surface| {
                 let mut buffer = surface.buffer_mut().unwrap();
-                let w = buffer.width().get() as usize;
-                let h = buffer.height().get() as usize;
+                let w = buffer.width().get();
+                let h = buffer.height().get();
                 f(&mut *buffer, w, h);
                 buffer.present().unwrap();
             }),
             Message::GetBox { resp } => {
                 let (w, h) = window.borrow_window().get_size();
-                let _ = resp.send((0, 0, w as u32, h as u32));
+                let _ = resp.send(Geometry {
+                    x: 0,
+                    y: 0,
+                    w: w as u32,
+                    h: h as u32,
+                });
             }
             Message::Quit => {
                 unsafe { glfw::ffi::glfwPostEmptyEvent() };

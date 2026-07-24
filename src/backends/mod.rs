@@ -3,6 +3,7 @@ pub mod dummy;
 #[cfg(feature = "backend-glfw")]
 pub mod glfw;
 
+use crate::utils::Geometry;
 use crossbeam::channel::{Receiver, Sender};
 
 pub trait Backend {
@@ -17,10 +18,10 @@ impl BackendSender {
     pub fn new(tx: Sender<Message>) -> Self {
         Self { tx }
     }
-    pub fn with_buffer(&self, f: impl FnOnce(&mut [u32], usize, usize) + Send + 'static) {
+    pub fn with_buffer(&self, f: impl FnOnce(&mut [u32], u32, u32) + Send + 'static) {
         let _ = self.tx.send(Message::WithBuffer { f: Box::new(f) });
     }
-    pub fn get_box(&self) -> (u32, u32, u32, u32) {
+    pub fn get_box(&self) -> Geometry {
         let (tx, rx) = crossbeam::channel::bounded(1);
         let _ = self.tx.send(Message::GetBox { resp: tx });
         rx.recv().unwrap()
@@ -30,10 +31,10 @@ impl BackendSender {
 // #[derive(Debug)]
 pub enum Message {
     WithBuffer {
-        f: Box<dyn FnOnce(&mut [u32], usize, usize) + Send>,
+        f: Box<dyn FnOnce(&mut [u32], u32, u32) + Send>,
     },
     GetBox {
-        resp: Responder<(u32, u32, u32, u32)>,
+        resp: Responder<Geometry>,
     },
     Quit,
 }

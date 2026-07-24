@@ -137,17 +137,17 @@ impl WlRegistryListener for Client {
                     .await;
             }
             WlOutput::NAME => {
-                let (x, y, w, h) = self.shared_state.get_box();
+                let geometry = self.shared_state.get_box();
                 // FIXME: Make difference between physical and logical size
                 let mut data = Vec::new();
                 let wl_output = WlOutput { object_id: id };
                 data.extend(
                     wl_output
                         .geometry(
-                            x as i32,
-                            y as i32,
-                            w as i32,
-                            h as i32,
+                            geometry.x as i32,
+                            geometry.y as i32,
+                            geometry.w as i32,
+                            geometry.h as i32,
                             WlOutputSubpixel::Unknown,
                             "Not your buisness".to_owned(),
                             "Not your buisness".to_owned(),

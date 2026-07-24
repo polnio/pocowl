@@ -1,5 +1,5 @@
 use crate::backends::BackendSender;
-use crate::utils::WaylandBuffer;
+use crate::utils::{Geometry, WaylandBuffer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
@@ -29,7 +29,7 @@ impl SharedState {
     pub fn unset_recalculate_needed(&self) {
         self.is_recalculate_needed.store(false, Ordering::Relaxed);
     }
-    pub fn get_box(&self) -> (u32, u32, u32, u32) {
+    pub fn get_box(&self) -> Geometry {
         self.backend_sender.get_box()
     }
 }

@@ -1,4 +1,5 @@
 use super::Backend;
+use crate::utils::Geometry;
 use crossbeam::channel::Receiver;
 
 pub struct DummyBackend;
@@ -13,7 +14,12 @@ impl Backend for DummyBackend {
             match message {
                 super::Message::WithBuffer { .. } => {}
                 super::Message::GetBox { resp } => {
-                    let _ = resp.send((0, 0, 100, 100));
+                    let _ = resp.send(Geometry {
+                        x: 0,
+                        y: 0,
+                        w: 100,
+                        h: 100,
+                    });
                 }
                 super::Message::Quit => break,
             }

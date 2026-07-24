@@ -73,6 +73,8 @@ impl Server {
                     Event::Render(buffer) => {
                         tthis.backend_sender.with_buffer(move |wbuffer, w, h| {
                             for (i, c) in buffer.data.iter().enumerate() {
+                                let w = w as usize;
+                                let h = h as usize;
                                 let x = i % buffer.stride;
                                 let y = i / buffer.stride;
                                 if x > w || y > h {
