@@ -49,6 +49,7 @@ impl Server {
             let stream = stream.into_std()?;
             let stream = WaylandStream::new(stream)?;
 
+            // Cloning is fine, since this is a ref counter
             let state = self.state.clone();
             tokio::spawn(async move {
                 let result = Self::handle_connection(stream, state)
@@ -84,7 +85,7 @@ impl Server {
     }
     async fn handle_response(stream: &mut WaylandStream, resp: WaylandMessage) {
         let result = stream
-            .write_all(&resp.to_raw())
+            .write_all(&resp.into_raw())
             .await
             .context("Failed to send response");
         if let Err(e) = result {

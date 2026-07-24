@@ -4,6 +4,7 @@ use crossbeam::channel::Receiver;
 use glfw::Context as _;
 use ouroboros::self_referencing;
 use std::num::NonZeroU32;
+use std::sync::{Arc, Mutex};
 
 #[self_referencing]
 pub struct GlfwBackendWindow {
@@ -41,14 +42,14 @@ impl GlfwBackend {
             surface.buffer_mut().unwrap().present().unwrap();
         });
 
-        let window = std::sync::Arc::new(std::sync::Mutex::new(window));
+        let window = Arc::new(Mutex::new(window));
 
         let (events_tx, events_rx) = crossbeam::channel::unbounded::<Vec<glfw::WindowEvent>>();
 
         let (stop_tx, stop_rx) = crossbeam::channel::bounded(1);
 
         std::thread::spawn({
-            let window = window.clone();
+            let window = Arc::clone(&window);
             move || {
                 loop {
                     let c = crossbeam::select! {

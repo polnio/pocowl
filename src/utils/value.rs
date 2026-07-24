@@ -93,12 +93,10 @@ where
     T: WaylandValue + Clone,
 {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
+        let old = *buf;
         let data = T::from_raw(buf)?;
-        // FIXME: Find a way to lookup instead of cloning
-        let bytes = data.clone().to_raw();
-        // SAFETY: transmute is safe because the bytes are 32 bit aligned
-        let u32bytes = unsafe { std::mem::transmute::<&[u8], &[u32]>(&bytes) };
-        Ok(u32bytes.iter().any(|&x| x != 0).then_some(data))
+        let bytes = &old[..old.len() - buf.len()];
+        Ok(bytes.chunks(4).any(|x| x != &[0, 0, 0, 0]).then_some(data))
     }
     fn to_raw(self) -> Vec<u8> {
         match self {

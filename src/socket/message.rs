@@ -15,12 +15,12 @@ impl WaylandMessage {
             data,
         }
     }
-    pub fn to_raw(&self) -> Vec<u8> {
+    pub fn into_raw(self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(self.data.len() + 8);
         vec.extend(self.object_id.to_ne_bytes());
         vec.extend(self.opcode.to_ne_bytes());
         vec.extend((self.data.len() as u16 + 8).to_ne_bytes());
-        vec.extend(self.data.clone());
+        vec.extend(self.data);
         vec
     }
     pub async fn read(mut stream: impl AsyncRead + Unpin) -> Result<Option<Self>> {

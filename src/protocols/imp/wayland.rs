@@ -322,8 +322,6 @@ impl WlSurfaceListener for Client {
             return;
         }
         // buffer.buf.data = data;
-        // TODO: Do I need to copy the buffer?
-        // let buf = buffer.buf.clone();
         let buf = WaylandBuffer {
             data,
             stride: buffer.width,
