@@ -24,6 +24,7 @@ struct Interface {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum MessageWrapper {
+    Description(Description),
     Request(Message),
     Event(Message),
     Enum(Enum),
@@ -34,6 +35,8 @@ enum MessageWrapper {
 struct Message {
     #[serde(rename = "@name")]
     name: String,
+    #[serde(rename = "description")]
+    description: Option<Description>,
     #[serde(rename = "arg", default)]
     args: Vec<Arg>,
 }
@@ -49,6 +52,13 @@ struct Arg {
     allow_null: bool,
     #[serde(rename = "@enum", default)]
     enum_: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+struct Description {
+    #[serde(rename = "@summary")]
+    summary: Option<String>,
+    #[serde(rename = "#text")]
+    content: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -83,6 +93,8 @@ impl Type {
 struct Enum {
     #[serde(rename = "@name")]
     name: String,
+    #[serde(rename = "description")]
+    description: Option<Description>,
     #[serde(rename = "entry")]
     entries: Vec<EnumEntry>,
 }
@@ -92,6 +104,27 @@ struct EnumEntry {
     name: String,
     #[serde(rename = "@value")]
     value: String,
+    #[serde(rename = "description")]
+    description: Option<Description>,
+}
+
+impl Description {
+    fn trim_string(s: &str) -> String {
+        s.lines().map(|s| s.trim()).collect::<Vec<_>>().join("\n")
+    }
+    fn to_tokens(&self) -> TokenStream2 {
+        match (&self.summary, &self.content) {
+            (Some(s), Some(c)) => {
+                let s = Self::trim_string(s) + "\n\n" + &Self::trim_string(c);
+                quote!(#[doc = #s])
+            }
+            (Some(s), None) | (None, Some(s)) => {
+                let s = Self::trim_string(s);
+                quote!(#[doc = #s])
+            }
+            (None, None) => TokenStream2::new(),
+        }
+    }
 }
 
 fn deserialize_ignore_any<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
@@ -185,6 +218,7 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                     let name = generate_ident!("{}", ccase!(snake, &request.name));
                     let name_raw =
                         generate_ident!("{}_from_raw", ccase!(snake, &request.name));
+                    let desc = request.description.as_ref().map(Description::to_tokens).unwrap_or_default();
                     let raw_args = Iterator::zip(args_name.iter(), is_fd.iter()).map(|(arg, is_fd)| {
                         if *is_fd {
                             quote!(let #arg = fds.pop_front().unwrap();)
@@ -193,6 +227,7 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         }
                     });
                     Some(quote! {
+                        #desc
                         async fn #name(&mut self, object: #struct_name, #(#args_name: #args_ty,)*);
                         async fn #name_raw(&mut self, message: WaylandMessage, fds: &mut VecDeque<OwnedFd>) {
                             let mut buf = message.data.as_slice();
@@ -215,7 +250,9 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                     let raw_args = Iterator::zip(args_name.iter(), args_are_fds.iter()).filter_map(|(arg, is_fd)| {
                         (!is_fd).then(|| quote!(WaylandValue::to_raw(#arg)))
                     });
+                    let desc = event.description.as_ref().map(Description::to_tokens).unwrap_or_default();
                     Some(quote! {
+                        #desc
                         pub fn #name(self, #(#args_name: #args_ty),*) -> WaylandMessage {
                             let mut buf_dont_collide_with_args = Vec::new();
                             #(buf_dont_collide_with_args.extend(#raw_args);)*
@@ -223,6 +260,11 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         }
                     })
                 });
+
+                let description = interface.messages.iter().find_map(|event| match event {
+                    MessageWrapper::Description(desc) => Some(desc.to_tokens()),
+                    _ => None,
+                }).unwrap_or_default();
 
                 let enums = interface.messages.iter().filter_map(|enum_| {
                     let MessageWrapper::Enum(enum_) = enum_ else {
@@ -244,9 +286,12 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                                 return None;
                             },
                         };
-                        Some(quote!(#name = #value,))
+                        let desc = entry.description.as_ref().map(Description::to_tokens).unwrap_or_default();
+                        Some(quote!(#desc #name = #value,))
                     });
+                    let desc = enum_.description.as_ref().map(Description::to_tokens).unwrap_or_default();
                     Some(quote! {
+                        #desc
                         #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, num_enum::TryFromPrimitive)]
                         #[repr(u32)]
                         pub enum #name {
@@ -282,6 +327,7 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
 
                 quote! {
                     #(#enums)*
+                    #description
                     #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
                     pub struct #struct_name {
                         pub object_id: u32,
@@ -319,6 +365,7 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                             Box::new(*self)
                         }
                     }
+                    #description
                     #[async_trait::async_trait]
                     pub trait #trait_name: Send {
                         #(#trait_methods)*
