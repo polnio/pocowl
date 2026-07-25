@@ -84,7 +84,7 @@ impl Type {
             Type::String => quote!(String),
             Type::FD => quote!(i32),
             // TODO: Handle more types
-            Type::Array => quote!(()),
+            Type::Array => quote!(Vec<u32>),
         }
     }
 }

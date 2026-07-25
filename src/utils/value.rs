@@ -34,18 +34,7 @@ impl WaylandValue for i32 {
 
 impl WaylandValue for String {
     fn from_raw(buf: &mut &[u8]) -> Result<Self> {
-        let len = buf.read_u32::<NativeEndian>()?;
-        let alen = align(len as usize, 4);
-        let mut bytes = vec![0; alen];
-        let n = buf.read(&mut bytes)?;
-        if n != alen {
-            return Err(anyhow::anyhow!(
-                "length bigger than message size: {} > {} bytes",
-                alen,
-                n
-            ));
-        }
-        bytes.truncate(len as usize);
+        let bytes = array_bytes_from_raw(buf)?;
         let cstr = CString::from_vec_with_nul(bytes)?;
         let s = cstr.into_string()?;
         Ok(s)
@@ -53,14 +42,54 @@ impl WaylandValue for String {
     fn to_raw(self) -> Vec<u8> {
         let cstr = CString::new(self).expect("Failed to convert string to CString");
         let bytes = cstr.into_bytes_with_nul();
-        let len = bytes.len() as u32;
-        let real_len = align(len as usize + 4, 4);
-        let mut vec = Vec::with_capacity(real_len);
-        vec.extend(len.to_ne_bytes());
-        vec.extend(bytes);
-        vec.extend(vec![0; real_len - vec.len()]);
-        vec
+        array_bytes_to_raw(bytes)
     }
+}
+
+impl<T: WaylandValue> WaylandValue for Vec<T> {
+    fn from_raw(buf: &mut &[u8]) -> Result<Self> {
+        let bytes = array_bytes_from_raw(buf)?;
+        let mut items = Vec::new();
+        while !bytes.is_empty() {
+            let item = WaylandValue::from_raw(buf)?;
+            items.push(item);
+        }
+        Ok(items)
+    }
+
+    fn to_raw(self) -> Vec<u8> {
+        let bytes = self
+            .into_iter()
+            .flat_map(|item| item.to_raw().into_iter())
+            .collect();
+        array_bytes_to_raw(bytes)
+    }
+}
+
+fn array_bytes_from_raw(buf: &mut &[u8]) -> Result<Vec<u8>> {
+    let len = buf.read_u32::<NativeEndian>()?;
+    let alen = align(len as usize, 4);
+    let mut bytes = vec![0; alen];
+    let n = buf.read(&mut bytes)?;
+    if n != alen {
+        return Err(anyhow::anyhow!(
+            "length bigger than message size: {} > {} bytes",
+            alen,
+            n
+        ));
+    }
+    bytes.truncate(len as usize);
+    Ok(bytes)
+}
+
+fn array_bytes_to_raw(bytes: Vec<u8>) -> Vec<u8> {
+    let len = bytes.len() as u32;
+    let real_len = align(len as usize + 4, 4);
+    let mut vec = Vec::with_capacity(real_len);
+    vec.extend(len.to_ne_bytes());
+    vec.extend(bytes);
+    vec.extend(vec![0; real_len - vec.len()]);
+    vec
 }
 
 impl WaylandValue for I24F8 {
