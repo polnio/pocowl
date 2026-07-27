@@ -19,11 +19,11 @@ struct ImpWlSurface {
     inner: WlSurface,
     buffer: Option<WlBuffer>,
 }
-struct ImpWlBuffer {
-    inner: WlBuffer,
+pub struct ImpWlBuffer {
+    pub inner: WlBuffer,
     // buf: WaylandBuffer,
-    width: usize,
-    height: usize,
+    pub width: usize,
+    pub height: usize,
 }
 struct ImpWlShmPool {
     inner: WlShmPool,
@@ -43,6 +43,31 @@ impl Client {
     }
     fn wl_state_mut(&mut self) -> &mut ImpWaylandState {
         &mut self.imp_proto_states.wayland
+    }
+
+    pub fn wl_surfaces(&self) -> impl Iterator<Item = WlSurface> {
+        self.wl_state().surfaces.keys().copied()
+    }
+
+    pub fn get_surface_buffer(&self, surface: WlSurface) -> Option<&ImpWlBuffer> {
+        let surface = self.wl_state().surfaces.get(&surface)?;
+        let buffer = surface.buffer?;
+        Some(&self.wl_state().buffers[&buffer])
+    }
+
+    pub fn handle_disconnection(&mut self) {
+        for surface in self.wl_state().surfaces.values() {
+            let Some(buffer) = self.get_surface_buffer(surface.inner) else {
+                let object_id = surface.inner.object_id;
+                warn!("wl_surface#{object_id}::commit: surface has no buffer",);
+                return;
+            };
+            let buffer = WaylandBuffer {
+                stride: buffer.width,
+                data: vec![0; buffer.width * buffer.height],
+            };
+            self.app_handle.render(self.id, surface.inner, buffer);
+        }
     }
 }
 
@@ -281,9 +306,9 @@ impl WlSurfaceListener for Client {
         todo!()
     }
 
-    async fn commit(&mut self, surface: WlSurface) {
-        let object_id = surface.object_id;
-        let Some(surface) = self.wl_state().surfaces.get(&surface) else {
+    async fn commit(&mut self, wl_surface: WlSurface) {
+        let object_id = wl_surface.object_id;
+        let Some(surface) = self.wl_state().surfaces.get(&wl_surface) else {
             error!("wl_surface#{object_id}::commit: surface not found",);
             return;
         };
@@ -326,7 +351,7 @@ impl WlSurfaceListener for Client {
             data,
             stride: buffer.width,
         };
-        self.app_handle.render(buf);
+        self.app_handle.render(self.id, wl_surface, buf);
     }
 
     async fn set_buffer_transform(&mut self, surface: WlSurface, transform: WlOutputTransform) {

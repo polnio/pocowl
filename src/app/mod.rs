@@ -1,8 +1,10 @@
 mod client;
 mod handle;
+mod layout;
 
 pub use client::Client;
 pub use handle::AppHandle;
+use tracing::error;
 
 use crate::ClientId;
 use crate::backends::BackendSender;
@@ -19,6 +21,7 @@ pub struct App {
     clients: SlotMap<ClientId, Client>,
     fds: SecondaryMap<ClientId, VecDeque<OwnedFd>>,
     last_recalculate: std::time::Instant,
+    layout: layout::Layout,
 }
 
 impl App {
@@ -28,12 +31,14 @@ impl App {
         let clients = SlotMap::with_key();
         let fds = SecondaryMap::new();
         let last_recalculate = std::time::Instant::now();
+        let layout = layout::Layout::new();
         Self {
             handle,
             receiver,
             clients,
             fds,
             last_recalculate,
+            layout,
         }
     }
 
@@ -46,8 +51,20 @@ impl App {
         while let Some(event) = self.receiver.recv().await {
             match event {
                 Event::Connection { resp, sender } => {
-                    let id = self.clients.insert(Client::new(self.handle(), sender));
+                    let handle = self.handle();
+                    let id = self
+                        .clients
+                        .insert_with_key(|id| Client::new(id, handle, sender));
                     resp.send(id).unwrap();
+                }
+                Event::Disconnection { id } => {
+                    // FIXME: clear the screen region
+                    // self.clients[id].handle_disconnection();
+                    for xdg_toplevel in self.clients[id].xdg_toplevels() {
+                        let window = self.layout.find_window(id, xdg_toplevel).unwrap();
+                        self.layout.remove_window(window);
+                    }
+                    self.clients.remove(id);
                 }
                 Event::FdAttached { id, fd } => {
                     self.fds[id].push_back(fd);
@@ -65,13 +82,18 @@ impl App {
                     };
                     p.call(client, msg, fds).await;
                 }
-                Event::Render { buf } => {
+                Event::Render { id, surface, buf } => {
+                    println!("Render {id:?}");
+                    let Some(geometry) = self.surface_geometry(id, surface) else {
+                        error!("wl_surface#{}::render: No geometry", surface.object_id);
+                        continue;
+                    };
                     self.handle.backend().with_buffer(move |wbuffer, w, h| {
                         for (i, c) in buf.data.iter().enumerate() {
                             let w = w as usize;
                             let h = h as usize;
-                            let x = i % buf.stride;
-                            let y = i / buf.stride;
+                            let x = geometry.x as usize + i % buf.stride;
+                            let y = geometry.y as usize + i / buf.stride;
                             if x > w || y > h {
                                 continue;
                             }
@@ -86,6 +108,18 @@ impl App {
                     }
                     // FIXME: Make proper recalculation (eg: layout), and send configure
                     // requests to clients
+                    println!("--------------- Recalculate ---------------");
+                    let geometry = self.handle.backend().get_box();
+                    let configured = self.layout.recalculate(geometry);
+                    for (id, xdg_toplevel, geometry) in configured {
+                        println!("{geometry:?}");
+                        let client = &mut self.clients[id];
+                        client.configure(xdg_toplevel, geometry);
+                    }
+                    println!("--------------- End Recalculate ---------------");
+                }
+                Event::AddWindowAtFocused { id, xdg_toplevel } => {
+                    self.layout.add_window_at_focused(id, xdg_toplevel);
                 }
             }
         }

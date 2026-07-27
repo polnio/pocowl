@@ -1,21 +1,27 @@
-use crate::AppHandle;
 use crate::protocols::imp::ImpProtoStates;
 use crate::protocols::{DISPLAY_OBJECT, WaylandProtocol};
 use crate::socket::WaylandMessage;
+use crate::{AppHandle, ClientId};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 pub struct Client {
+    pub id: ClientId,
     pub app_handle: AppHandle,
     pub imp_proto_states: ImpProtoStates,
     sender: mpsc::UnboundedSender<WaylandMessage>,
     objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>>,
 }
 impl Client {
-    pub fn new(app_handle: AppHandle, sender: mpsc::UnboundedSender<WaylandMessage>) -> Self {
+    pub fn new(
+        id: ClientId,
+        app_handle: AppHandle,
+        sender: mpsc::UnboundedSender<WaylandMessage>,
+    ) -> Self {
         let objects: HashMap<u32, Box<dyn WaylandProtocol<Self> + Send>> = HashMap::new();
         let imp_proto_states = ImpProtoStates::default();
         let mut this = Self {
+            id,
             app_handle,
             imp_proto_states,
             sender,

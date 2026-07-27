@@ -81,6 +81,7 @@ impl Server {
             }
         }
         debug!("Connection closed");
+        state.app_handle.disconnection(id);
         Ok(())
     }
     async fn handle_response(stream: &mut WaylandStream, resp: WaylandMessage) {

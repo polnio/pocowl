@@ -1,6 +1,7 @@
 use crate::app::Client;
 use crate::protocols::wayland::{WlOutput, WlSeat, WlSurface};
 use crate::protocols::xdg_shell::*;
+use crate::utils::Geometry;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -24,6 +25,29 @@ impl Client {
     }
     fn xdg_shell_state_mut(&mut self) -> &mut ImpXdgShellState {
         &mut self.imp_proto_states.xdg_shell
+    }
+
+    pub fn xdg_toplevels(&self) -> impl Iterator<Item = XdgToplevel> {
+        self.xdg_shell_state().toplevels.keys().copied()
+    }
+
+    pub fn toplevel_from_surface(&self, wl_surface: WlSurface) -> Option<XdgToplevel> {
+        let state = self.xdg_shell_state();
+        state.toplevels.values().find_map(|toplevel| {
+            let xdg_surface = &state.surfaces[&toplevel.xdg_surface];
+            (xdg_surface.wl_surface == wl_surface).then_some(toplevel.inner)
+        })
+    }
+
+    pub fn configure(&mut self, xdg_toplevel: XdgToplevel, geometry: Geometry) {
+        self.send(xdg_toplevel.configure(geometry.w as i32, geometry.h as i32, Default::default()));
+        let toplevel = &self.xdg_shell_state().toplevels[&xdg_toplevel];
+        self.send(
+            toplevel
+                .xdg_surface
+                .configure(self.xdg_shell_state().next_serial),
+        );
+        self.xdg_shell_state_mut().next_serial += 1;
     }
 }
 
@@ -73,14 +97,16 @@ impl XdgSurfaceListener for Client {
     }
 
     async fn get_toplevel(&mut self, xdg_surface: XdgSurface, xdg_toplevel: XdgToplevel) {
-        let xdg_toplevel = ImpXdgToplevel {
+        let toplevel = ImpXdgToplevel {
             inner: xdg_toplevel,
             xdg_surface,
         };
-        self.add_object(xdg_toplevel.inner);
+        self.add_object(xdg_toplevel);
         self.xdg_shell_state_mut()
             .toplevels
-            .insert(xdg_toplevel.inner, xdg_toplevel);
+            .insert(xdg_toplevel, toplevel);
+        self.app_handle.add_window_at_focused(self.id, xdg_toplevel);
+        self.app_handle.recalculate();
     }
 
     async fn get_popup(
