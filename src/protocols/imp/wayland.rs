@@ -1,3 +1,4 @@
+// use super::WaylandWrapper;
 use crate::app::Client;
 use crate::protocols::xdg_shell::XdgWmBase;
 use crate::protocols::{DISPLAY_OBJECT, WaylandProtocol, wayland::*};
@@ -15,21 +16,27 @@ const SUPPORTED_INTERFACE_FACTORIES: [fn(u32) -> Box<dyn WaylandProtocol<Client>
     |id| Box::new(XdgWmBase { object_id: id }),
 ];
 
+#[derive(pocowl::WaylandWrapper)]
 struct ImpWlSurface {
     inner: WlSurface,
     buffer: Option<WlBuffer>,
 }
+
+#[derive(pocowl::WaylandWrapper)]
 pub struct ImpWlBuffer {
     pub inner: WlBuffer,
     // buf: WaylandBuffer,
     pub width: usize,
     pub height: usize,
 }
+
+#[derive(pocowl::WaylandWrapper)]
 struct ImpWlShmPool {
     inner: WlShmPool,
     buffers: Vec<WlBuffer>,
     mmap: MmapMut,
 }
+
 #[derive(Default)]
 pub struct ImpWaylandState {
     surfaces: HashMap<WlSurface, ImpWlSurface>,
@@ -58,8 +65,7 @@ impl Client {
     pub fn handle_disconnection(&mut self) {
         for surface in self.wl_state().surfaces.values() {
             let Some(buffer) = self.get_surface_buffer(surface.inner) else {
-                let object_id = surface.inner.object_id;
-                warn!("wl_surface#{object_id}::commit: surface has no buffer",);
+                warn!("#{surface}::commit: surface has no buffer",);
                 return;
             };
             let buffer = WaylandBuffer {
@@ -198,17 +204,11 @@ impl WlShmPoolListener for Client {
         format: WlShmFormat,
     ) {
         let Some(pool) = self.wl_state_mut().shm_pools.get_mut(&pool) else {
-            error!(
-                "wl_shm_pool#{}::create_buffer: pool not found",
-                pool.object_id
-            );
+            error!("{pool}::create_buffer: pool not found",);
             return;
         };
         if stride != width * 4 {
-            error!(
-                "wl_shm_pool#{}::create_buffer: stride and width don't match: {} != {}",
-                pool.inner.object_id, stride, width
-            );
+            error!("{pool}::create_buffer: stride and width don't match: {stride} != {width}",);
             return;
         }
         let buffer = ImpWlBuffer {
@@ -307,14 +307,13 @@ impl WlSurfaceListener for Client {
     }
 
     async fn commit(&mut self, wl_surface: WlSurface) {
-        let object_id = wl_surface.object_id;
         let Some(surface) = self.wl_state().surfaces.get(&wl_surface) else {
-            error!("wl_surface#{object_id}::commit: surface not found",);
+            error!("{wl_surface}::commit: surface not found");
             return;
         };
 
         let Some(buffer) = surface.buffer else {
-            warn!("wl_surface#{object_id}::commit: surface has no buffer",);
+            warn!("{wl_surface}::commit: surface has no buffer");
             return;
         };
 
@@ -324,7 +323,7 @@ impl WlSurfaceListener for Client {
             .iter()
             .find_map(|(_, pool)| pool.buffers.contains(&buffer).then_some(pool))
         else {
-            error!("wl_surface#{object_id}::commit: No shm pool for buffer",);
+            error!("{wl_surface}::commit: No shm pool for buffer");
             return;
         };
         let pool = self.wl_state().shm_pools.get(&pool.inner).unwrap();
@@ -340,7 +339,7 @@ impl WlSurfaceListener for Client {
         let elen = buffer.width * buffer.height;
         if elen != data.len() {
             error!(
-                "wl_surface#{object_id}::commit: buffer size {} != shmem size {}",
+                "{wl_surface}::commit: buffer size {} != shmem size {}",
                 elen,
                 data.len()
             );

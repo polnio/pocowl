@@ -325,6 +325,8 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                     })
                     .unzip();
 
+                let display_fmt = format!("{}#{{}}", xml_name_str);
+
                 quote! {
                     #(#enums)*
                     #description
@@ -363,6 +365,11 @@ fn generate_protocols(protocols: Vec<Protocol>) -> TokenStream2 {
                         }
                         fn copy(&self) -> Box<dyn WaylandProtocol<T> + Send> {
                             Box::new(*self)
+                        }
+                    }
+                    impl std::fmt::Display for #struct_name {
+                        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                            write!(f, #display_fmt, self.object_id)
                         }
                     }
                     #description
@@ -407,4 +414,26 @@ pub fn scan_protocol(input: TokenStream) -> TokenStream {
     };
     let tt = generate_protocols(protocols);
     tt.into()
+}
+
+#[proc_macro_derive(WaylandWrapper)]
+pub fn derive_wayland_wrapper(input: TokenStream) -> TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    let ident = input.ident;
+    // let wrapped = quote::format_ident!("{}", &ident.to_string()[3..]);
+
+    quote! {
+        // impl WaylandWrapper for #ident {
+        //     type Inner = #wrapped;
+        //     fn inner(&self) -> Self::Inner {
+        //         self.inner
+        //     }
+        // }
+        impl ::std::fmt::Display for #ident {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                self.inner.fmt(f)
+            }
+        }
+    }
+    .into()
 }

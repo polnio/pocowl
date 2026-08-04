@@ -6,3 +6,8 @@ pub struct ImpProtoStates {
     pub wayland: wayland::ImpWaylandState,
     pub xdg_shell: xdg_shell::ImpXdgShellState,
 }
+
+// trait WaylandWrapper {
+//     type Inner;
+//     fn inner(&self) -> Self::Inner;
+// }
